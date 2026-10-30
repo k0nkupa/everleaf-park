@@ -820,3 +820,473 @@ p {
 #notice {
   pointer-events: none;
 }
+/* The live world is the main surface; controls sit at its edges. */
+.world-page {
+  position: relative;
+  height: calc(100dvh - 76px);
+  min-height: 560px;
+  overflow: hidden;
+  padding: 0;
+  display: block;
+  background: none;
+}
+.world-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 460px;
+  overflow: hidden;
+  background: #c5c8b2;
+}
+.world-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline-offset: -4px;
+}
+.world-status {
+  position: absolute;
+  z-index: 5;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 18px 26px;
+  border-radius: 15px;
+  background: #fff8ec;
+  color: #403932;
+  box-shadow: 0 12px 40px #0002;
+  text-align: center;
+}
+.world-tools {
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  display: grid;
+  gap: 8px;
+  z-index: 4;
+}
+.world-tools button,
+.world-close {
+  width: 42px;
+  height: 42px;
+  border: 1px solid #c5b9a0;
+  border-radius: 50%;
+  background: #fff9efee;
+  color: #342e27;
+  font: 24px Georgia;
+  cursor: pointer;
+  box-shadow: 0 3px 10px #0001;
+}
+.world-help {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #fff9eeeb;
+  color: #514c41;
+  padding: 9px 16px;
+  border-radius: 30px;
+  font-size: 12px;
+  pointer-events: none;
+}
+.world-help span {
+  display: none;
+}
+.village-title {
+  position: absolute;
+  top: 30px;
+  left: 36px;
+  color: #302d28;
+  max-width: 340px;
+  pointer-events: none;
+  text-shadow: 0 1px 12px #fff8;
+}
+.village-title h1 {
+  font-size: 44px;
+  line-height: 1.1;
+  margin: 9px 0;
+}
+.village-title p {
+  margin: 10px 0 20px;
+}
+.village-title .row,
+.village-title details {
+  pointer-events: auto;
+}
+.village-title .btn {
+  background: #fff8eceb;
+  color: #40362b;
+  border-color: #a79270;
+  text-shadow: none;
+}
+.village-title .btn.p {
+  background: #526b5d;
+  color: #fff9ee;
+  border-color: #526b5d;
+}
+.village-search {
+  margin-top: 16px;
+  font-size: 14px;
+}
+.village-search summary {
+  cursor: pointer;
+  width: max-content;
+  border-bottom: 1px solid #817158;
+}
+.village-search[open] {
+  padding: 14px;
+  background: #fff8edeb;
+  border-radius: 14px;
+}
+.village-search .search-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.world-selection {
+  position: absolute;
+  bottom: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 18px 24px;
+  min-width: 340px;
+  max-width: 90%;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 12px 35px #0003;
+  z-index: 7;
+}
+.world-selection[hidden],
+.world-status[hidden] {
+  display: none;
+}
+.world-selection strong {
+  font-family: var(--serif, Georgia);
+  font-size: 26px;
+  overflow-wrap: anywhere;
+}
+.world-selection p {
+  margin: 4px 0 0;
+}
+.world-selection .world-close {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  font-size: 20px;
+}
+.memorial-info {
+  position: absolute;
+  left: 26px;
+  top: 25px;
+  width: 270px;
+  border-radius: 18px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 30px #0002;
+  overflow: hidden;
+  z-index: 3;
+}
+.memorial-info summary {
+  cursor: pointer;
+  list-style-position: inside;
+  font-family: var(--serif, Georgia);
+  font-size: 30px;
+  padding: 20px;
+  overflow-wrap: anywhere;
+}
+.memorial-info summary span {
+  display: block;
+  font-family: var(--sans, Arial);
+  font-size: 12px;
+  margin-top: 5px;
+}
+.memorial-info-body {
+  padding: 0 20px 20px;
+  max-height: 55vh;
+  overflow: auto;
+}
+.world-portrait {
+  width: 68px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 10px;
+  float: left;
+  margin: 0 12px 8px 0;
+}
+.memorial-info-body p {
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+.memorial-info-body .row {
+  clear: both;
+  gap: 8px;
+}
+.memorial-info-body .btn {
+  font-size: 12px;
+  padding: 9px 11px;
+  min-height: 36px;
+}
+.memorial-actions {
+  position: absolute;
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  width: max-content;
+  max-width: 95%;
+  z-index: 3;
+}
+.memorial-actions .btn {
+  white-space: nowrap;
+  font-size: 13px;
+  min-height: 42px;
+  padding: 10px 14px;
+}
+.sculpture-caption {
+  position: absolute;
+  top: 30px;
+  left: 35px;
+  max-width: 320px;
+  color: #39312b;
+}
+.sculpture-caption h1 {
+  font-size: 36px;
+}
+.sculpture-caption p {
+  margin: 12px 0;
+}
+.live-arrangement {
+  height: 560px;
+}
+.live-arrangement .world-view {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+.live-arrangement .placement {
+  z-index: 4;
+}
+.walk-pad {
+  display: none;
+}
+@media (max-width: 700px) {
+  .world-page {
+    height: calc(100dvh - 104px);
+    min-height: 560px;
+  }
+  .world-view {
+    min-height: 0;
+  }
+  .village-title {
+    top: 18px;
+    left: 18px;
+    max-width: 275px;
+  }
+  .village-title h1 {
+    font-size: 32px;
+  }
+  .village-title .eyebrow {
+    font-size: 9px;
+  }
+  .village-title p {
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  .village-title .btn {
+    font-size: 11px;
+    min-height: 36px;
+    padding: 8px 12px;
+  }
+  .world-tools {
+    right: 12px;
+    top: 18px;
+  }
+  .world-tools button {
+    width: 34px;
+    height: 34px;
+  }
+  .world-help {
+    bottom: 12px;
+    font-size: 10px;
+    padding: 8px 12px;
+  }
+  .world-help {
+    font-size: 0;
+  }
+  .world-help span {
+    display: block;
+    font-size: 10px;
+  }
+  .walk-pad {
+    position: absolute;
+    left: 16px;
+    bottom: 65px;
+    width: 114px;
+    display: grid;
+    grid-template-columns: repeat(3, 36px);
+    gap: 3px;
+    z-index: 5;
+  }
+  .walk-pad button {
+    background: #fff9eee8;
+    color: #473b2c;
+    border: 1px solid #b9a88b;
+    border-radius: 10px;
+    height: 36px;
+    font-size: 20px;
+    touch-action: none;
+  }
+  .walk-pad button:first-child {
+    grid-column: 2;
+  }
+  .walk-pad button:nth-child(2) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .walk-pad button:nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .walk-pad button:nth-child(4) {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  .world-selection {
+    bottom: 165px;
+    padding: 14px;
+    gap: 12px;
+    min-width: 0;
+    width: calc(100% - 30px);
+  }
+  .world-selection strong {
+    font-size: 22px;
+  }
+  .world-selection .btn {
+    font-size: 11px;
+    min-width: 120px;
+  }
+  .world-selection p {
+    font-size: 11px;
+  }
+  .memorial-info {
+    left: 14px;
+    top: 16px;
+    width: 250px;
+    max-width: calc(100% - 70px);
+  }
+  .memorial-info summary {
+    padding: 12px 16px;
+    font-size: 25px;
+  }
+  .memorial-info-body {
+    max-height: 36vh;
+  }
+  .memorial-actions {
+    bottom: 49px;
+    left: auto;
+    right: 12px;
+    transform: none;
+    width: calc(100% - 155px);
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 8px;
+  }
+  .memorial-actions .btn {
+    flex: 1 1 65px;
+    padding: 8px;
+    font-size: 10px;
+    min-height: 33px;
+  }
+  .sculpture-caption {
+    top: 20px;
+    left: 20px;
+    max-width: 270px;
+  }
+  .sculpture-caption h1 {
+    font-size: 28px;
+  }
+  .live-arrangement {
+    height: 520px;
+  }
+}
+.world-plot-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-height: 36px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid #b59a6b;
+  border-radius: 20px;
+  padding: 7px 18px;
+  background: #fff8eaee;
+  color: #39312a;
+  font-family: Georgia, serif;
+  font-size: 16px;
+  box-shadow: 0 3px 12px #0002;
+  cursor: pointer;
+  z-index: 2;
+}
+.world-plot-label[hidden] {
+  display: none;
+}
+@media (max-width: 700px) {
+  .world-plot-label {
+    min-height: 40px;
+    font-size: 13px;
+    max-width: 135px;
+    padding: 7px 13px;
+  }
+}
+.village-title {
+  padding: 20px 24px;
+  background: #fff7e9e8;
+  border: 1px solid #d3c4a0;
+  border-radius: 18px;
+  text-shadow: none;
+}
+.village-title h1 {
+  font-family: Fraunces, Georgia, serif;
+  font-size: 36px;
+}
+.village-title .eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+}
+@media (max-width: 700px) {
+  .village-title {
+    padding: 14px 16px;
+    max-width: 275px;
+  }
+  .village-title h1 {
+    font-size: 28px;
+  }
+  .village-title p {
+    margin: 8px 0 12px;
+  }
+}
+.memorial-info-body .row {
+  flex-wrap: wrap;
+}
+.sculpture-caption {
+  padding: 18px 22px;
+  border-radius: 18px;
+  background: #fff8e9eb;
+  color: #3e332a;
+  border: 1px solid #cdbb9a;
+}

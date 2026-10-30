@@ -1,0 +1,92 @@
+[
+  {
+    "file": "A_garden.glb",
+    "before": 16467540,
+    "after": 2815220
+  },
+  {
+    "file": "A_house.glb",
+    "before": 6426116,
+    "after": 1475900
+  },
+  {
+    "file": "B_garden.glb",
+    "before": 14776456,
+    "after": 2983096
+  },
+  {
+    "file": "B_house.glb",
+    "before": 9168924,
+    "after": 2147012
+  },
+  {
+    "file": "C_garden.glb",
+    "before": 7553120,
+    "after": 1562776
+  },
+  {
+    "file": "C_house.glb",
+    "before": 1417040,
+    "after": 628760
+  },
+  {
+    "file": "pet_bird.glb",
+    "before": 44988,
+    "after": 10708
+  },
+  {
+    "file": "pet_cat.glb",
+    "before": 182588,
+    "after": 36152
+  },
+  {
+    "file": "pet_dog.glb",
+    "before": 368796,
+    "after": 67824
+  },
+  {
+    "file": "pet_dog_photo.glb",
+    "before": 464052,
+    "after": 84228
+  },
+  {
+    "file": "pet_dog_stylized.glb",
+    "before": 409332,
+    "after": 75248
+  },
+  {
+    "file": "pet_guinea.glb",
+    "before": 82204,
+    "after": 17828
+  },
+  {
+    "file": "pet_horse.glb",
+    "before": 469780,
+    "after": 87548
+  },
+  {
+    "file": "pet_rabbit.glb",
+    "before": 128140,
+    "after": 26308
+  },
+  {
+    "file": "pet_turtle.glb",
+    "before": 66228,
+    "after": 14724
+  },
+  {
+    "file": "sculpture_photo.glb",
+    "before": 618040,
+    "after": 126788
+  },
+  {
+    "file": "sculpture_stylized.glb",
+    "before": 563320,
+    "after": 117756
+  },
+  {
+    "file": "village.glb",
+    "before": 34897232,
+    "after": 5598708
+  }
+]

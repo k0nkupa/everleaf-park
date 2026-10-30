@@ -48,6 +48,7 @@ for (const [table, definition] of [
   ["memories", "previous_status TEXT"],
   ["media", "hidden INTEGER NOT NULL DEFAULT 0"],
   ["audit", "target_id TEXT"],
+  ["memorials", "plot_index INTEGER"],
 ] as const) {
   const column = definition.split(" ")[0];
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as {
@@ -56,3 +57,16 @@ for (const [table, definition] of [
   if (!columns.some((c) => c.name === column))
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
 }
+
+transaction(() => {
+  let next = one<{ n: number }>(
+    "SELECT COALESCE(MAX(plot_index),-1)+1 n FROM memorials",
+  )!.n;
+  for (const m of many<{ id: string }>(
+    "SELECT id FROM memorials WHERE plot_index IS NULL ORDER BY created_at,id",
+  ))
+    run("UPDATE memorials SET plot_index=? WHERE id=?", next++, m.id);
+  run(
+    "CREATE UNIQUE INDEX IF NOT EXISTS memorial_plot ON memorials(plot_index)",
+  );
+});

@@ -199,6 +199,7 @@ function bounded(value: unknown) {
 export function publicSummary(m: Memorial) {
   return {
     id: m.id,
+    plot_index: m.plot_index,
     name: m.name,
     species: m.species,
     born: m.born,

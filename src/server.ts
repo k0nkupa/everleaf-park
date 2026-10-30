@@ -50,6 +50,12 @@ if (!development && (!origin.startsWith("https://") || !emailConfigured))
   throw Error(
     "Public mode requires HTTPS APP_ORIGIN and configured Resend sender.",
   );
+const preview = process.env.PREVIEW_MODE === "1";
+if (preview && (!development || emailConfigured))
+  throw Error(
+    "Preview mode requires loopback development with email disabled.",
+  );
+const cookieName = preview ? "everleaf_preview" : "everleaf";
 const moderators = (process.env.MODERATOR_EMAILS || "")
   .toLowerCase()
   .split(",")
@@ -58,7 +64,7 @@ const publicDir = resolve("public"),
   hash = (v: string) => createHash("sha256").update(v).digest("hex"),
   token = () => randomBytes(32).toString("hex");
 const cookie = (v: string, max = 30 * 86400) =>
-  `everleaf=${v}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${max}${origin.startsWith("https:") ? "; Secure" : ""}`;
+  `${cookieName}=${v}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${max}${origin.startsWith("https:") ? "; Secure" : ""}`;
 const esc = (s: string) =>
   s.replace(
     /[&<>"']/g,
@@ -71,8 +77,8 @@ function session(req: IncomingMessage): User | null {
   const value = req.headers.cookie
     ?.split(";")
     .map((s) => s.trim())
-    .find((s) => s.startsWith("everleaf="))
-    ?.slice(9);
+    .find((s) => s.startsWith(cookieName + "="))
+    ?.slice(cookieName.length + 1);
   if (!value || !/^[a-f0-9]{64}$/.test(value)) return null;
   const u = one<Omit<User, "moderator">>(
     "SELECT u.id,u.email,u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires_at>?",
@@ -190,7 +196,40 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       return send(res, 200, { pending: cleanupCount(u.id) });
   }
   if (path === "/api/session" && method === "GET")
-    return send(res, 200, { user, emailConfigured, development });
+    return send(res, 200, { user, emailConfigured, development, preview });
+  if (path === "/api/preview/session" && method === "POST") {
+    if (!preview) throw new HttpError(404, "Not found.");
+    if (user) return send(res, 200, { user });
+    rateLimit("preview-session:" + ip, 30);
+    const b = await body(req),
+      name = text(b.name || "Keeper", "Your name", 80, true),
+      uid = id(),
+      secret = token();
+    transaction(() => {
+      run(
+        "INSERT INTO users(id,email,name,created_at) VALUES(?,?,?,?)",
+        uid,
+        uid + "@preview.invalid",
+        name,
+        Date.now(),
+      );
+      run(
+        "INSERT INTO sessions(hash,user_id,expires_at) VALUES(?,?,?)",
+        hash(secret),
+        uid,
+        Date.now() + 30 * 86400000,
+      );
+    });
+    res.setHeader("Set-Cookie", cookie(secret));
+    return send(res, 201, {
+      user: {
+        id: uid,
+        name,
+        email: uid + "@preview.invalid",
+        moderator: false,
+      },
+    });
+  }
   if (path === "/api/auth/request" && method === "POST") {
     rateLimit("login-ip:" + ip, 20);
     const b = await body(req),
@@ -280,7 +319,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   }
   if (path === "/api/logout" && method === "POST") {
     const v = req.headers.cookie?.match(
-      /(?:^|;\s*)everleaf=([a-f0-9]{64})/,
+      new RegExp("(?:^|;\\s*)" + cookieName + "=([a-f0-9]{64})"),
     )?.[1];
     if (v) run("DELETE FROM sessions WHERE hash=?", hash(v));
     res.setHeader("Set-Cookie", cookie("", 0));
@@ -332,25 +371,30 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const b = validateMemorial(await body(req)),
       mid = id(),
       now = Date.now();
-    run(
-      "INSERT INTO memorials(id,owner_id,name,species,born,passed,message,theme,setting,style,finish,visibility,review,arrangement,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      mid,
-      u.id,
-      b.name,
-      b.species,
-      b.born,
-      b.passed,
-      b.message,
-      b.theme,
-      b.setting,
-      b.style,
-      b.finish,
-      b.visibility,
-      Number(b.review),
-      JSON.stringify(b.arrangement),
-      now,
-      now,
-    );
+    transaction(() => {
+      run(
+        "INSERT INTO memorials(id,owner_id,name,species,born,passed,message,theme,setting,style,finish,visibility,review,arrangement,created_at,updated_at,plot_index) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        mid,
+        u.id,
+        b.name,
+        b.species,
+        b.born,
+        b.passed,
+        b.message,
+        b.theme,
+        b.setting,
+        b.style,
+        b.finish,
+        b.visibility,
+        Number(b.review),
+        JSON.stringify(b.arrangement),
+        now,
+        now,
+        one<{ n: number }>(
+          "SELECT COALESCE(MAX(plot_index),-1)+1 n FROM memorials",
+        )!.n,
+      );
+    });
     return send(res, 201, getMemorial(mid, u));
   }
   const match = path.match(/^\/api\/memorials\/([a-zA-Z0-9-]+)(?:\/(.*))?$/);
@@ -418,7 +462,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       );
       if (status === "published") {
         requireValue(
-          m.portrait_id,
+          preview || m.portrait_id,
           "Choose a public portrait before publishing.",
         );
         requireValue(!m.moderated, "This memorial is under moderation review.");
@@ -1281,11 +1325,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     ".webp": "image/webp",
     ".ttf": "font/ttf",
     ".svg": "image/svg+xml",
+    ".glb": "model/gltf-binary",
+    ".json": "application/json",
   };
   res.writeHead(200, {
     "Content-Type": mime[extname(target)] || "application/octet-stream",
     "Cache-Control":
-      extname(target) === ".html" ? "no-store" : "public, max-age=3600",
+      development || extname(target) === ".html"
+        ? "no-store"
+        : "public, max-age=3600",
   });
   res.end(method === "HEAD" ? undefined : bytes);
 }
@@ -1295,7 +1343,7 @@ const server = createServer((req, res) => {
   res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   );
   route(req, res).catch((error) => {
     if (res.headersSent) {

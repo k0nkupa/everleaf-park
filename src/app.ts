@@ -12,6 +12,9 @@ import {
   type Report,
   type Placement,
 } from "./types.ts";
+import { mountWorld, type WorldHandle } from "./world.ts";
+let world: WorldHandle | null = null,
+  preview = false;
 const root = document.getElementById("app")!;
 const esc = (v: unknown) =>
   String(v ?? "").replace(
@@ -29,7 +32,6 @@ let user: User | null = null,
   noticeTimer: ReturnType<typeof setTimeout>;
 const img = (m: Pick<Memorial, "species" | "style" | "finish">) =>
   `/assets/img/species/${m.species}_${m.style === "photo" ? "photo" : m.finish}.jpg`;
-// shortcut: The supplied scenes and sculptures are renders; use model assets when real-time 3D is supplied.
 const backdrop = (m: Pick<Memorial, "theme" | "setting">) =>
   `/assets/img/${m.theme}_${m.setting}.jpg`;
 const url = (path: string) => "#" + path;
@@ -173,28 +175,35 @@ function detailsForm(m: Partial<Memorial> = {}) {
 function memorialCard(m: Memorial) {
   return `<article class="panel memorial-card t-${m.theme}"><img class="cover" src="${backdrop(m)}" alt="${esc(THEMES[m.theme].name)} ${m.setting === "house" ? "Memory House" : "Stillwater"}"><div class="copy">${m.portrait ? `<img class="portrait" src="${esc(m.portrait)}" alt="${esc(m.name)}">` : ""}<h2>${esc(m.name)}</h2><p class="small muted">${esc(SPECIES[m.species])} · ${esc([m.born, m.passed].filter(Boolean).join(" – "))}</p><p class="small">${esc(THEMES[m.theme].name)} · ${m.setting === "house" ? "Memory House" : "Stillwater"}</p>${m.status ? `<span class="badge">${esc(m.status)} · ${esc(m.visibility)}</span>` : ""}<div class="row">${link("Visit", `/m/${m.id}`, "btn p")}${canManage(m) ? link("Edit", `/edit/${m.id}/details`) : ""}${canManage(m) ? link("Settings", `/settings/${m.id}`) : ""}</div></div></article>`;
 }
+function worldFrame(scene: string, records: Memorial[] = [], focus = "") {
+  return `<div class="world-view" id="world" data-scene="${scene}" data-records="${esc(JSON.stringify(records))}" data-focus="${esc(focus)}"><p class="world-status" role="status">Opening 3D…</p><div class="world-selection" hidden><div><strong data-selection-name></strong><p class="small">A place of their own.</p></div><button class="btn p" data-world-control="enter">Enter memorial</button><button class="world-close" aria-label="Close selected memorial" data-world-control="close">×</button></div><div class="world-tools"><button aria-label="Zoom in" title="Zoom in" data-world-control="zoom-in">+</button><button aria-label="Zoom out" title="Zoom out" data-world-control="zoom-out">−</button><button aria-label="Return to entrance" title="Return to entrance" data-world-control="reset">⌂</button></div><div class="walk-pad" aria-label="Movement controls"><button data-walk-key="w" aria-label="Move forward">↑</button><button data-walk-key="a" aria-label="Move left">←</button><button data-walk-key="s" aria-label="Move backward">↓</button><button data-walk-key="d" aria-label="Move right">→</button></div><p class="world-help">WASD / arrows to walk · drag to look · scroll to zoom<span>Tap the ground to walk. Tap a name to enter.</span></p></div>`;
+}
 async function publicPage(query: URLSearchParams) {
   const q = query.get("q") || "",
     list = query.get("view") === "list",
     species = query.get("species") || "",
     theme = query.get("theme") || "";
-  const data = await api<{ items: Memorial[] }>(
+  const { items } = await api<{ items: Memorial[] }>(
     `/memorials?q=${encodeURIComponent(q)}&species=${species}&theme=${theme}`,
   );
+  const search = `<form id="search-form" class="search-form"><label class="small" for="q">Find a pet</label><input id="q" name="q" value="${esc(q)}" placeholder="Pet name"><select name="species" aria-label="Filter species"><option value="">All species</option>${options(SPECIES, species)}</select><select name="theme" aria-label="Filter theme"><option value="">All themes</option>${options(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.name])), theme)}</select><button class="btn p">Search</button></form>`;
+  if (list || q || species || theme)
+    return shell(
+      `<main class="content"><div class="section-heading"><h1>The village</h1>${link("Explore in 3D", "/")}</div><section class="panel">${search}</section><div class="cards results">${items.length ? items.map(memorialCard).join("") : '<p class="empty">No public memorials match. Try another name or create a place of your own.</p>'}</div></main>`,
+    );
+  const mine = user
+    ? (await api<{ items: Memorial[] }>("/memorials?mine=1")).items
+    : [];
+  const visible = [
+    ...new Map(
+      [
+        ...items,
+        ...mine.filter((v) => v.status !== "archived" && !v.moderated),
+      ].map((v) => [v.id, v]),
+    ).values(),
+  ];
   return shell(
-    `<main class="village"><div class="village-tools"><section class="panel"><div><h1>Welcome to the village</h1><p class="muted">Every place celebrates a much-loved pet.</p></div><form id="search-form" class="search-form"><label class="small" for="q">Find a pet</label><input id="q" name="q" value="${esc(q)}" placeholder="Pet name"><select name="species" aria-label="Filter species"><option value="">All species</option>${options(SPECIES, species)}</select><select name="theme" aria-label="Filter theme"><option value="">All themes</option>${options(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.name])), theme)}</select><button class="btn p">Search</button></form><div class="row">${link(list ? "Village view" : "List view", "/?" + new URLSearchParams({ q, species, theme, view: list ? "village" : "list" }).toString())}${q ? link("Clear", "/") : ""}</div></section></div>${
-      !data.items.length
-        ? `<section class="empty"><h2>${q ? "No memorials match that name." : "A place for their story."}</h2><p>${q ? "Try another spelling or browse the village." : "Create a memorial, choose its theme and share the memories you want to keep."}</p><div class="form-actions">${link("Create a memorial", "/create", "btn p")}${q ? link("Browse all", "/") : ""}</div></section>`
-        : list || q || species || theme
-          ? `<div class="content results"><div class="cards">${data.items.map(memorialCard).join("")}</div></div>`
-          : `<div class="village-map" aria-label="Public memorials">${data.items
-              .map((m, i) => {
-                const a = i * 2.39996,
-                  r = 18 + Math.min(24, i * 2.2);
-                return `<a class="marker" href="#/m/${m.id}" style="left:${50 + Math.cos(a) * r}%;top:${45 + Math.sin(a) * r}%" aria-label="Visit ${esc(m.name)}, ${esc(SPECIES[m.species])}">${m.portrait ? `<img src="${esc(m.portrait)}" alt="">` : ""}<span class="dot" style="background:${m.theme === "A" ? "#e8a93b" : m.theme === "B" ? "#ff5e5b" : "#b9a6d9"}"></span>${esc(m.name)}</a>`;
-              })
-              .join("")}</div>`
-    }</main>`,
+    `<main class="world-page village-live">${worldFrame("village", visible, query.get("focus") || "")}<div class="village-title"><span class="eyebrow">A PLACE TO REMEMBER</span><h1>Everleaf Village</h1><p>Walk a little. Keep their story close.</p><div class="row">${link("Create a memorial", "/create", "btn p")}${link("Memorial list", "/?view=list", "btn")}</div><details class="village-search"><summary>Find a pet</summary>${search}</details></div></main>`,
   );
 }
 async function homePage() {
@@ -206,12 +215,16 @@ async function homePage() {
   );
 }
 function loginPage(query: URLSearchParams) {
+  if (preview)
+    return shell(
+      `<main class="content narrow"><section class="panel"><h1>Keep a place of their own.</h1><form id="preview-form">${field("Your name", "name", "Keeper", 'required maxlength="80"')}<input type="hidden" name="next" value="${esc(query.get("next") || "/#/home")}">${errorBox()}${finishActions("Continue")}</form></section></main>`,
+    );
   return shell(
     `<main class="content narrow"><section class="panel"><h1>Sign in to keep going</h1><p>We’ll send a one-time link. No password needed.</p>${query.get("error") ? '<p class="error">That link expired or was already used. Request a fresh one.</p>' : ""}<form id="login-form">${field("Your name", "name", "", 'required maxlength="80" autocomplete="name"')}${field("Email", "email", "", 'required autocomplete="email"', "email")}<input type="hidden" name="next" value="${esc(query.get("next") || "/#/home")}">${errorBox()}${finishActions("Send sign-in link")}</form><div id="login-result"></div></section></main>`,
   );
 }
 function createPage() {
-  if (authRequired()) return "";
+  if (!preview && authRequired()) return "";
   return shell(
     `<main class="content narrow"><section class="panel"><h1>Tell us about your pet</h1><p class="muted">Nothing is public until you publish.</p><form id="create-form">${detailsForm()}${errorBox()}${finishActions("Save draft and add photos")}</form></section></main>`,
   );
@@ -302,7 +315,7 @@ async function editPage(mid: string, step: string) {
         dirty = true;
       }
     } catch {}
-    inside = `<div class="columns"><section><div class="edit-scene" id="edit-scene" style="background-image:url('${backdrop(m)}')">${placement.map((p, i) => placementButton(p, i)).join("")}</div><p class="small muted">Drag a keepsake, or focus it and use the arrow keys. Save when the arrangement feels right.</p></section><aside class="panel"><h2>Keepsakes</h2><div class="place-tools">${KEEPSAKES.map((k) => button("+ " + k, "add-keepsake", "btn", `data-kind="${k}"`)).join("")}</div><div class="place-tools">${button("Reset arrangement", "reset-arrangement")}${button("Save arrangement", "save-arrangement", "btn p")}</div>${errorBox()}<div class="form-actions">${link("Preview & publish", `/edit/${mid}/publish`, "btn p")}</div></aside></div>`;
+    inside = `<div class="columns"><section><div class="edit-scene live-arrangement" id="edit-scene">${worldFrame("memorial")}${placement.map((p, i) => placementButton(p, i)).join("")}</div><p class="small muted">Drag a keepsake, or focus it and use the arrow keys. Save when the arrangement feels right.</p></section><aside class="panel"><h2>Keepsakes</h2><div class="place-tools">${KEEPSAKES.map((k) => button("+ " + k, "add-keepsake", "btn", `data-kind="${k}"`)).join("")}</div><div class="place-tools">${button("Reset arrangement", "reset-arrangement")}${button("Save arrangement", "save-arrangement", "btn p")}</div>${errorBox()}<div class="form-actions">${link("Preview & publish", `/edit/${mid}/publish`, "btn p")}</div></aside></div>`;
   }
   if (step === "publish")
     inside = `<div class="columns"><form id="publish-form" class="panel"><h2>Who can visit?</h2><div class="stack">${[
@@ -320,13 +333,14 @@ async function editPage(mid: string, step: string) {
       )
       .join(
         "",
-      )}</div><label style="margin-top:20px"><input type="checkbox" name="review" ${m.review ? "checked" : ""}> Review new memories before they appear</label>${m.moderated ? '<p class="error">This memorial is hidden while moderation reviews it. You can still edit its content.</p>' : ""}${!m.portrait_id ? `<p class="error">Add a public portrait before publishing. ${link("Add portrait", `/edit/${mid}/photos`)}</p>` : ""}${errorBox()}${finishActions(m.status === "published" ? "Save visibility and visit" : "Publish memorial")}</form><section class="panel"><h2>Visitor preview</h2>${memorialCard(m)}<p class="small muted" style="margin-top:16px">The selected sculpture is ${esc(m.style === "photo" ? "naturalistic" : FINISHES[m.finish])}. Your portrait and all approved memories stay with the memorial.</p></section></div>`;
+      )}</div><label style="margin-top:20px"><input type="checkbox" name="review" ${m.review ? "checked" : ""}> Review new memories before they appear</label>${m.moderated ? '<p class="error">This memorial is hidden while moderation reviews it. You can still edit its content.</p>' : ""}${!m.portrait_id && !preview ? `<p class="error">Add a public portrait before publishing. ${link("Add portrait", `/edit/${mid}/photos`)}</p>` : ""}${errorBox()}${finishActions(m.status === "published" ? "Save visibility and visit" : "Publish memorial")}</form><section class="panel"><h2>Visitor preview</h2>${memorialCard(m)}<p class="small muted" style="margin-top:16px">The selected sculpture is ${esc(m.style === "photo" ? "naturalistic" : FINISHES[m.finish])}. Your portrait and all approved memories stay with the memorial.</p></section></div>`;
   return shell(
     `<main class="content">${stepsUI(m, step)}<div class="section-heading"><div><h1>${title}</h1><p class="muted">${esc(m.name)} · ${m.status === "draft" ? "Private draft" : "Saved memorial"}</p></div>${link("My memorials", "/home")}</div><section class="${["photos", "personalize", "publish"].includes(step) ? "" : "panel"}">${inside}</section></main>`,
     m,
   );
 }
 function rememberArrangement() {
+  world?.setArrangement(placement);
   if (current && user) {
     try {
       sessionStorage.setItem(
@@ -352,25 +366,12 @@ async function memorialPage(mid: string, readable = false) {
       `<main class="content"><div class="section-heading"><h1>${esc(m.name)}</h1>${link("Open their place", `/m/${mid}`)}</div><div class="columns"><section class="stack">${memories.length ? memories.map((v) => memoryCard(v, m)).join("") : '<p class="empty">No memories yet. Be the first to add one.</p>'}</section><aside class="panel">${portrait(m)}<p>${esc(m.message)}</p><div class="form-actions">${mayContribute(m) ? link("Light a candle", `/candle/${mid}`, "btn p") : ""}${mayContribute(m) ? link("Add a memory", `/contribute/${mid}`) : ""}</div></aside></div></main>`,
       m,
     );
-  const placements = m.arrangement
-    .map(
-      (p, i) =>
-        `<a class="placement" style="left:${p.x}%;top:${p.y}%" href="#/${p.kind === "Candles" ? "candle" : p.kind === "Memory album" ? "album" : "inspect"}/${mid}">${esc(p.kind)}</a>`,
-    )
-    .join("");
   return shell(
-    `<main class="scene-layout" style="background-image:url('${backdrop(m)}')"><section class="panel identity">${portrait(m)}<h1>${esc(m.name)}</h1><p class="muted">${esc([m.born, m.passed].filter(Boolean).join(" – "))}</p><p>${esc(m.message)}</p><p class="small">${m.status === "draft" ? "Keeper preview · unpublished" : m.status === "archived" ? "Archived · keeper view" : m.visibility === "public" ? "Public memorial" : m.visibility === "link" ? "Shared by link" : "Invitation only"}</p>${m.moderated ? '<p class="error">Hidden while moderation reviews it.</p>' : ""}${canManage(m) ? link("Edit their place", `/edit/${mid}/details`) : ""}</section><div class="scene-center" style="background-image:${innerWidth < 700 ? `url('${backdrop(m)}')` : "none"}"><figure class="sculpture-preview"><a href="#/inspect/${mid}"><img src="${img(m)}" alt="${esc(SPECIES[m.species])} memorial sculpture"><figcaption>Inspect sculpture</figcaption></a></figure>${placements}<nav class="scene-links">${mayContribute(m) ? link("Light a candle", `/candle/${mid}`, "btn p") : ""}${link("Open memories", `/album/${mid}`)}${mayContribute(m) ? link("Add a memory", `/contribute/${mid}`) : ""}</nav></div><aside class="panel tribute"><h3>Remembering together</h3><p>${memories.length} shared ${memories.length === 1 ? "memory" : "memories"} · ${candles.length} active ${candles.length === 1 ? "candle" : "candles"}</p>${candles
-      .slice(0, 3)
-      .map(
-        (c) =>
-          `<p>“${esc(c.message || "A light, with love.")}”<br><span class="muted small">— ${esc(c.author)}</span></p>`,
-      )
-      .join(
-        "",
-      )}<div class="stack">${link("Contributors", `/circle/${mid}`)}${link("Read without 3D", `/read/${mid}`)}${link("Report a concern", `/report/${mid}`)}${canManage(m) ? link("Family & review", `/family/${mid}`) : ""}${link("Back to the village", "/")}</div></aside></main>`,
+    `<main class="world-page scene-layout">${worldFrame("memorial")}<details class="memorial-info" ${innerWidth > 700 ? "open" : ""}><summary>${esc(m.name)}<span>${esc([m.born, m.passed].filter(Boolean).join(" – "))}</span></summary><div class="memorial-info-body">${m.portrait ? portrait(m, "world-portrait") : ""}<p>${esc(m.message)}</p><p class="small muted">${m.status === "draft" ? "Unpublished · keeper view" : m.status === "archived" ? "Archived · keeper view" : m.visibility === "public" ? "Public memorial" : m.visibility === "link" ? "Shared by link" : "Invitation only"}</p><div class="row">${canManage(m) ? link("Edit their place", `/edit/${mid}/details`) : ""}${canManage(m) ? link("Family & review", `/family/${mid}`) : ""}${link("Contributors", `/circle/${mid}`)}${link("Read without 3D", `/read/${mid}`)}${link("Report a concern", `/report/${mid}`)}</div></div></details><nav class="memorial-actions">${mayContribute(m) ? link("Light a candle", `/candle/${mid}`, "btn p") : ""}${link("Open memories", `/album/${mid}`)}${mayContribute(m) ? link("Add a memory", `/contribute/${mid}`) : ""}${link("Back to the village", "/")}</nav></main>`,
     m,
   );
 }
+
 function memoryCard(v: Memory, m: Memorial, review = false) {
   return `<article class="panel album-entry" id="memory-${v.id}"><h2>${esc(v.title)}</h2><p class="author">${esc(v.author)}${v.date ? " · " + esc(v.date) : ""} · ${esc(v.status)}</p>${v.hidden_media_count ? '<p class="small muted">A photograph is hidden while moderation reviews it.</p>' : ""}${v.media_ids.map((fid) => `<img src="/media/${fid}" alt="Photo shared with this memory">`).join("")}<p>${esc(v.story)}</p><div class="row">${v.user_id === user?.id || canManage(m) ? link("Edit", `/contribute/${m.id}?memory=${v.id}`) : ""}${v.user_id === user?.id || canManage(m) ? button("Remove", "remove-memory", "btn", `data-id="${v.id}"`) : ""}${review && v.status === "pending" ? button("Approve", "approve-memory", "btn p", `data-id="${v.id}"`) + button("Keep private to family", "family-memory", "btn", `data-id="${v.id}"`) + button("Decline", "decline-memory", "btn", `data-id="${v.id}"`) : ""}${["approved", "family"].includes(v.status) ? link("Report", `/report/${m.id}?memory=${v.id}`) : ""}</div></article>`;
 }
@@ -475,10 +476,11 @@ async function circlePage(mid: string) {
 async function inspectPage(mid: string) {
   const m = await loadMemorial(mid);
   return shell(
-    `<main class="content narrow"><section class="panel"><h1>${esc(m.name)}’s sculpture</h1><img class="sculpture" src="${img(m)}" alt="${esc(SPECIES[m.species])} ${m.style === "photo" ? "naturalistic" : esc(FINISHES[m.finish])} sculpture"><p class="collection-note">A still memorial sculpture from the ${m.style === "photo" ? "naturalistic" : "stylized"} collection.</p><div class="form-actions">${link("Return to their place", `/m/${mid}`)}${canManage(m) ? link("Choose sculpture", `/edit/${mid}/sculpture`, "btn p") : ""}</div></section></main>`,
+    `<main class="world-page sculpture-live">${worldFrame("sculpture")}<section class="sculpture-caption"><h1>${esc(m.name)}’s sculpture</h1><p>Drag to turn. Zoom to look closer.</p><div class="row">${link("Return to their place", `/m/${mid}`)}${canManage(m) ? link("Choose sculpture", `/edit/${mid}/sculpture`, "btn p") : ""}</div></section></main>`,
     m,
   );
 }
+
 function draftKey() {
   return `everleaf-draft:${user?.id || "visitor"}:${location.hash}`;
 }
@@ -534,6 +536,8 @@ function restoreForm() {
 }
 async function render() {
   const n = ++revision;
+  world?.destroy();
+  world = null;
   current = null;
   const { parts: p, query: q } = route();
   try {
@@ -600,6 +604,19 @@ async function render() {
     document.body.dataset.route = p[0] || "village";
     restoreForm();
     window.scrollTo(0, 0);
+    const host = root.querySelector<HTMLElement>("#world");
+    if (host) {
+      world = mountWorld(host, {
+        kind: host.dataset.scene as "village" | "memorial" | "sculpture",
+        memorial: active || undefined,
+        records: JSON.parse(host.dataset.records || "[]"),
+        focus: host.dataset.focus,
+        onVisit: (id) => go("/m/" + id),
+        onCreate: () => go("/create"),
+        onAction: (action) =>
+          go(action === "village" ? "/" : `/${action}/${active!.id}`),
+      });
+    }
   } catch (error) {
     if (n !== revision) return;
     root.className = "t-N";
@@ -773,6 +790,18 @@ document.addEventListener("submit", async (event) => {
       );
       return;
     }
+    if (form.id === "preview-form") {
+      const session = await api<{ user: User }>(
+        "/preview/session",
+        "POST",
+        data,
+      );
+      user = session.user;
+      const next = data.next?.startsWith("/#/") ? data.next.slice(2) : "/home";
+      done(next);
+      await render();
+      return;
+    }
     if (form.id === "login-form") {
       const result = await api<{ message: string; loginUrl?: string }>(
         "/auth/request",
@@ -784,6 +813,12 @@ document.addEventListener("submit", async (event) => {
       return;
     }
     if (form.id === "create-form") {
+      if (preview && !user) {
+        const session = await api<{ user: User }>("/preview/session", "POST", {
+          name: "Keeper",
+        });
+        user = session.user;
+      }
       const result = await api<Memorial>("/memorials", "POST", {
         ...defaults,
         ...data,
@@ -824,7 +859,11 @@ document.addEventListener("submit", async (event) => {
               ? "personalize"
               : "";
       done(
-        next ? `/edit/${m!.id}/${next}` : `/m/${m!.id}`,
+        next
+          ? `/edit/${m!.id}/${next}`
+          : form.id === "publish-form" && preview
+            ? `/?focus=${m!.id}`
+            : `/m/${m!.id}`,
         form.id === "publish-form" ? "Memorial saved." : "Changes saved.",
       );
       return;
@@ -1211,8 +1250,11 @@ async function loadMemorial(mid: string) {
 }
 async function start() {
   try {
-    const session = await api<{ user: User | null }>("/session");
+    const session = await api<{ user: User | null; preview: boolean }>(
+      "/session",
+    );
     user = session.user;
+    preview = session.preview;
     await render();
   } catch (error) {
     root.innerHTML = `<main class="content"><p class="error">${esc(error instanceof Error ? error.message : "Everleaf could not open.")}</p></main>`;

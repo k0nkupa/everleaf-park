@@ -17,6 +17,7 @@ export function queueEmail(
   contextId: string | null = null,
 ) {
   const id = randomUUID();
+  if (process.env.PREVIEW_MODE === "1") return id;
   run(
     "INSERT INTO mail(id,context_id,to_email,subject,text,created_at) VALUES(?,?,?,?,?,?)",
     id,
