@@ -197,7 +197,7 @@
       2.6199
     ]
   ],
-  "bytes": 5598708,
+  "bytes": 6951484,
   "mesh_objects": 149,
   "export_bytes": 34897232,
   "optimization": {
@@ -207,8 +207,8 @@
       "-kn",
       "-km",
       "-vpf",
-      "-si",
-      "0.8"
+      "-vp",
+      "16"
     ]
   }
 }

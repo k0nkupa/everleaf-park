@@ -1,0 +1,40 @@
+{
+  "status": "passed",
+  "checks": [
+    "fountain collision blocks the visitor; reset restores the entrance and camera",
+    "supplied village renders in WebGL; keyboard walking and pointer orbit change the actual camera",
+    "real creation automatically establishes a local-only keeper session without email and saves a private draft with stable plot",
+    "memorial drag-look and mouse-wheel zoom change the actual rendered view",
+    "actual portrait upload, saved sculpture/finish, 3D keepsake arrangement, publish, named village plot and entering the house through UI",
+    "created plot persists after reload and a real world marker opens its saved memorial",
+    "anonymous visitor can select and enter the actual published memorial",
+    "all six supplied house/garden/theme environments save, load as live geometry and allow walking",
+    "both supplied dog sculpture shapes and six other species extracted from the village load in the actual memorial",
+    "private memorial remains enterable by its keeper and absent from anonymous village and direct access",
+    "phone layout renders live village and memorial with working on-screen movement controls and no horizontal overflow",
+    "existing archive protections and visibility review remain in force in the 3D preview"
+  ],
+  "modelsLoaded": [
+    "/models/village.glb",
+    "/models/A_house.glb",
+    "/models/pet_dog_stylized.glb",
+    "/models/A_garden.glb",
+    "/models/B_house.glb",
+    "/models/B_garden.glb",
+    "/models/C_house.glb",
+    "/models/C_garden.glb",
+    "/models/sculpture_stylized.glb",
+    "/models/sculpture_photo.glb",
+    "/models/pet_dog_photo.glb",
+    "/models/pet_cat.glb",
+    "/models/pet_rabbit.glb",
+    "/models/pet_bird.glb",
+    "/models/pet_guinea.glb",
+    "/models/pet_horse.glb",
+    "/models/pet_turtle.glb"
+  ],
+  "pageErrors": [],
+  "emailsSent": 0,
+  "emailQueue": 0,
+  "isolatedDatabase": true
+}

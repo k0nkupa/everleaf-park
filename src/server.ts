@@ -462,7 +462,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       );
       if (status === "published") {
         requireValue(
-          preview || m.portrait_id,
+          m.portrait_id,
           "Choose a public portrait before publishing.",
         );
         requireValue(!m.moderated, "This memorial is under moderation review.");
@@ -1343,7 +1343,7 @@ const server = createServer((req, res) => {
   res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self'; connect-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   );
   route(req, res).catch((error) => {
     if (res.headersSent) {

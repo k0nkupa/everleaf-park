@@ -39,3 +39,57 @@ Final focused follow-up: no remaining blocking findings within the six fixes. Re
 ## Remaining acceptance limits
 
 This is a local implementation, not a deployed service. Resend credentials are configured privately, but verified domain status and delivery are unconfirmed. The supplied environments and sculptures are rendered images, not interactive 3D model assets. Browser upload checks use the real HTML file input, not the native operating-system file picker. Backups, HTTPS/proxy behavior and hosting acceptance remain deployment work.
+
+# Playable 3D preview review
+
+Fixed baseline: `9f4a1c0`. Initial implementation checkpoint: `cb67e36`. The user authorized the supplied Blender files for a playable village, memorial creation and entering the memorial; email is deferred. The following reviews concern that scope.
+
+## Standards axis — 3D
+
+Initial review: five findings, worst severity P1. All blocking findings and targeted follow-ups were resolved.
+
+| Finding                                                                 | Resolution                                                                                                                                                   |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Generated-bundle rule was ambiguous for exported models.                | Clarified repo guidance: generated JavaScript stays ignored; optimized GLB models and provenance are versioned product assets needed to run the preview.     |
+| Repeated scene changes did not dispose light shadow render targets.     | Teardown disposes light shadow maps, geometry, materials and textures. A single renderer/canvas is reused; old event listeners and render lists are cleared. |
+| Later plot indices could exceed navigation bounds.                      | Navigation bounds, camera range and ground expand to cover the persisted locations.                                                                          |
+| Return to entrance teleported the visitor without restoring the camera. | Reset restores a coherent player/camera/target/rotation tuple. The village entrance is canonical even after restoring saved walking state.                   |
+| Geometry counters could accept a blank frame.                           | Browser checks now inspect actual canvas pixel coverage and WebGL error state, alongside scene readiness and saved-data readbacks.                           |
+
+Follow-up fixes include wheel zoom for memorial views, cached shadow invalidation, and a collision check that waits for the visitor to reach the boundary before measuring a stable stop. Reviewer confirmed the remaining reset and timing findings closed by static inspection. The repeated world-mode branches were noted as a judgement call and retained to keep the three direct camera/interaction modes together.
+
+## Spec axis — 3D
+
+Initial review: three P2 findings; a later reset edge case was also resolved.
+
+| Finding                                                             | Resolution                                                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Preview unnecessarily removed the portrait publication requirement. | Restored the requirement in server and UI. Only email/session access differs in preview.                            |
+| Collision/repeated-view acceptance was not directly established.    | Real Chrome checks cover fountain blocking, entrance reset, repeated environments, rendered pixels and GPU errors.  |
+| Village loaded the same pet assets serially for each record.        | Per-world asset requests are memoized and loaded in parallel; each placement receives its own transform and finish. |
+| A resumed visit redefined the entrance.                             | Reset uses the canonical village entrance; resuming the camera does not apply the walking offset twice.             |
+
+The focused static follow-up reported no remaining blocker for these findings.
+
+## Visual review
+
+One independent review covered desktop and phone screenshots against the supplied village and Lantern Bloom source renders. Five actionable issues were corrected, then checked visually by the implementation owner:
+
+- Restored complete house shells and small props by disabling mesh simplification. Browser compression retains the source geometry.
+- Capped projected labels to readable screen sizes and hid labels that would be clipped.
+- Corrected portrait-phone framing and the duplicated resume-position camera offset.
+- Wrapped sculpture controls and restored readable contrast.
+- Enlarged phone touch controls to 44 pixels and separated notifications from movement instructions.
+
+The source lighting/material character is adapted for real-time rendering; procedural grain is simplified. No new art direction was substituted for the supplied scenes.
+
+## Final runtime evidence
+
+- Type check and browser bundle build pass.
+- `verification-integration.json`: 32 actual HTTP/database/filesystem checks, including preview access being unavailable outside explicit preview mode.
+- `verification-browser.json`: 16 full website browser journeys.
+- `verification-3d.json`: 12 live 3D journeys covering all 17 model files, all six environments, both dog shapes, seven species, real creation/entry, collision, camera controls, public/private boundaries and phone controls.
+- Console/GPU checks and actual canvas pixels are checked; submitted triangles alone are not treated as visual acceptance.
+- No email was sent or queued by the preview checks. No unit/Jest suites or hooks were run.
+
+Remaining limits: local preview only, simplified navigation collision, adapted live lighting/procedural materials, and browser viewport checks rather than physical-phone acceptance. Other species share their extracted mesh across finish treatments; no user photo generates a model.

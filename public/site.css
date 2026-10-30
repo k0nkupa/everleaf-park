@@ -1290,3 +1290,40 @@ p {
   color: #3e332a;
   border: 1px solid #cdbb9a;
 }
+.sculpture-caption .row {
+  flex-wrap: wrap;
+}
+.sculpture-caption .btn {
+  color: #3e332a;
+  border-color: #9e8869;
+  background: #fff8eb;
+  min-height: 44px;
+  font-size: 12px;
+}
+.sculpture-caption .btn.p {
+  background: #f7c574;
+}
+body[data-route="village"] #notice,
+body[data-route="m"] #notice,
+body[data-route="inspect"] #notice {
+  bottom: 150px;
+}
+@media (max-width: 700px) {
+  .world-tools button {
+    width: 44px;
+    height: 44px;
+  }
+  .walk-pad {
+    width: 138px;
+    grid-template-columns: repeat(3, 44px);
+  }
+  .walk-pad button {
+    height: 44px;
+  }
+  .memorial-actions {
+    width: calc(100% - 174px);
+  }
+  .village-title {
+    max-width: min(275px, calc(100% - 82px));
+  }
+}

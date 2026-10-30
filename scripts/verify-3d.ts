@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { createServer } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
+import sharp from "sharp";
 const scratch = await mkdtemp(resolve(tmpdir(), "everleaf-3d-"));
 const out = resolve(process.env.BROWSER_EVIDENCE || "../../work/preview-3d");
 await mkdir(out, { recursive: true });
@@ -58,6 +59,19 @@ async function page() {
   const p = await context.newPage();
   p.setDefaultTimeout(30000);
   p.on("pageerror", (e) => errors.push(e.message));
+  p.on("console", (msg) => {
+    if (/WebGL|INVALID|Shader|buffer/i.test(msg.text()))
+      console.log("BROWSER", msg.text());
+    if (
+      (msg.type() === "error" &&
+        !(
+          msg.text().includes("404") &&
+          msg.location().url.includes("/api/memorials/")
+        )) ||
+      /GL_INVALID|WebGLProgram.*Error/.test(msg.text())
+    )
+      errors.push(msg.text());
+  });
   p.on("request", (r) => {
     if (r.url().includes("api.resend.com")) emailRequests++;
   });
@@ -94,9 +108,46 @@ async function ready(p: Page) {
   assert(
     Number(await p.locator("#world").getAttribute("data-draw-calls")) < 500,
   );
+  assert.equal(
+    await p
+      .locator("canvas.world-canvas")
+      .evaluate((c) =>
+        (c as HTMLCanvasElement).getContext("webgl2")!.getError(),
+      ),
+    0,
+    "WebGL must draw without GPU errors",
+  );
 }
 async function shot(p: Page, name: string) {
   await ready(p);
+  const image = await p.locator("canvas.world-canvas").screenshot();
+  const pixels = await sharp(image)
+    .resize(96, 64)
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const theme =
+    (await p.locator("#app").getAttribute("class"))?.match(/t-([ABC])/)?.[1] ||
+    "A";
+  const sky = (
+    { A: [232, 198, 162], B: [181, 216, 227], C: [23, 38, 63] } as Record<
+      string,
+      number[]
+    >
+  )[theme];
+  let visible = 0;
+  for (let i = 0; i < pixels.length; i += 3)
+    if (
+      Math.abs(pixels[i] - sky[0]) +
+        Math.abs(pixels[i + 1] - sky[1]) +
+        Math.abs(pixels[i + 2] - sky[2]) >
+      50
+    )
+      visible++;
+  assert(
+    visible / (96 * 64) > 0.3,
+    name + " must visibly render its environment, not only a background",
+  );
   await p.screenshot({
     path: resolve(out, name + ".png"),
     fullPage: true,
@@ -109,6 +160,7 @@ async function shot(p: Page, name: string) {
   );
 }
 async function walk(p: Page) {
+  await p.locator("canvas.world-canvas").focus();
   const before = await p.locator("#world").getAttribute("data-position"),
     camera = await p.locator("#world").getAttribute("data-camera");
   for (const key of ["w", "a", "s", "d"]) {
@@ -177,6 +229,37 @@ try {
   assert.equal(session.emailConfigured, false);
   assert.equal(session.user, null);
   await shot(owner, "01-village");
+  await owner.keyboard.down("w");
+  await owner.waitForFunction(
+    () => {
+      const p = document
+        .getElementById("world")
+        ?.dataset.position?.split(",")
+        .map(Number);
+      return p && p[1] < 1.3;
+    },
+    {},
+    { timeout: 10000 },
+  );
+  await owner.waitForTimeout(350);
+  const stopped = await owner.locator("#world").getAttribute("data-position");
+  await owner.waitForTimeout(350);
+  await owner.keyboard.up("w");
+  assert.equal(
+    await owner.locator("#world").getAttribute("data-position"),
+    stopped,
+    "the fountain must block walking",
+  );
+  await owner
+    .getByRole("button", { name: "Return to entrance", exact: true })
+    .click();
+  await owner.waitForFunction(
+    () => document.getElementById("world")?.dataset.position === "0.000,7.000",
+  );
+  check(
+    "fountain collision blocks the visitor; reset restores the entrance and camera",
+  );
+
   await walk(owner);
   await shot(owner, "02-walking");
   const canvas = owner.locator("canvas.world-canvas"),
@@ -264,6 +347,39 @@ try {
     .click();
   await owner.waitForURL(new RegExp("/m/" + id + "$"));
   await ready(owner);
+  const view = owner.locator("canvas.world-canvas"),
+    viewport = (await view.boundingBox())!,
+    oldCamera = await owner.locator("#world").getAttribute("data-camera");
+  await owner.mouse.move(
+    viewport.x + viewport.width * 0.7,
+    viewport.y + viewport.height * 0.4,
+  );
+  await owner.mouse.down();
+  await owner.mouse.move(
+    viewport.x + viewport.width * 0.7 + 70,
+    viewport.y + viewport.height * 0.4 + 20,
+    { steps: 8 },
+  );
+  await owner.mouse.up();
+  assert.notEqual(
+    await owner.locator("#world").getAttribute("data-camera"),
+    oldCamera,
+    "drag must turn the memorial camera",
+  );
+  const zoomBefore = await view.screenshot();
+  await owner.mouse.wheel(0, -250);
+  await owner.waitForTimeout(150);
+  assert.notDeepEqual(
+    await view.screenshot(),
+    zoomBefore,
+    "wheel must change the rendered zoom",
+  );
+  await owner
+    .getByRole("button", { name: "Return to entrance", exact: true })
+    .click();
+  check(
+    "memorial drag-look and mouse-wheel zoom change the actual rendered view",
+  );
   await walk(owner);
   await shot(owner, "04-entered-house");
   record = await (
@@ -283,6 +399,13 @@ try {
     (await owner.locator("#world").getAttribute("data-records"))!,
   );
   assert.equal(records.find((m: { id: string }) => m.id === id).plot_index, 0);
+  await owner
+    .getByRole("button", { name: "Return to entrance", exact: true })
+    .click();
+  await owner.waitForFunction(
+    () => document.getElementById("world")?.dataset.position === "0.000,7.000",
+  );
+
   await owner
     .getByRole("button", { name: "Select Biscuit’s memorial", exact: true })
     .click();
@@ -361,6 +484,7 @@ try {
     visibility: "private",
   });
   await visitor.goto(origin + "/#/m/" + id);
+  await visitor.reload();
   await visitor
     .getByRole("heading", { name: "This place is not available." })
     .waitFor();

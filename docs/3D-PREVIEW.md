@@ -9,3 +9,5 @@ Export source copies without saving over the supplied Blender files. Convert met
 Acceptance: actual Chrome WebGL rendering and camera movement, collision boundaries, mouse/touch input, saved memorial appearing at a stable plot after reload, entering house and garden, all six environments loaded, visible selected sculpture, private/public boundaries, readable fallback and no email requirement.
 
 Review baseline: `9f4a1c0`, the completed local website before the 3D work. Existing package changes adding Three.js are part of this preview.
+
+Implementation: the village uses an orbitable overhead camera; memorials use a walking camera with drag-to-look. GLB models use meshopt compression with full geometry retained. The browser gate checks rendered canvas pixels and actual WebGL error state, in addition to saved-data/API readbacks. Source hashes are retained in scene manifests.

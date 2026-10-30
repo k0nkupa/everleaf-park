@@ -30,7 +30,8 @@ for o in scene.objects:
  if solid_box or solid_round:
   if KIND=='village' and solid_box and dz<1.3:continue
   meta['colliders'].append([round(b[0],3),round(-b[4],3),round(b[3],3),round(-b[1],3)])
-# Flatten unsupported procedural color networks to their palette. Packed image materials stay intact.
+# shortcut: Procedural grain uses palette colors; bake textures when exact Cycles material matching is needed.
+# Packed image materials stay intact.
 for mat in bpy.data.materials:
  if not mat.use_nodes:continue
  nodes=mat.node_tree.nodes

@@ -192,6 +192,10 @@ async function upload(
 }
 try {
   await start();
+  await anon.request("/api/preview/session", "POST", {}, 404);
+  checks.push(
+    "email-free session route is unavailable outside explicit preview mode",
+  );
   await owner.login("owner@example.test", "Owner");
   await alex.login("alex@example.test", "Alex");
   await viewer.login("viewer@example.test", "Viewer");

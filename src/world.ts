@@ -35,6 +35,12 @@ function disposeTree(root: THREE.Object3D) {
     materials = new Set<THREE.Material>(),
     textures = new Set<THREE.Texture>();
   root.traverse((o) => {
+    if (
+      o instanceof THREE.DirectionalLight ||
+      o instanceof THREE.SpotLight ||
+      o instanceof THREE.PointLight
+    )
+      o.shadow.map?.dispose();
     if (o instanceof THREE.Mesh || o instanceof THREE.Sprite) {
       if (o instanceof THREE.Mesh) geometries.add(o.geometry);
       for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -118,8 +124,9 @@ export function mountWorld(
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = m?.theme === "C" ? 1.5 : 1.2;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   const camera =
     options.kind === "village"
       ? new THREE.OrthographicCamera(-12, 12, 9, -9, 0.05, 180)
@@ -161,6 +168,7 @@ export function mountWorld(
   scene.add(fill);
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
+  const petCache = new Map<string, Promise<THREE.Group>>();
   async function load(path: string) {
     const response = await fetch(path, { signal });
     if (!response.ok) throw Error("The 3D asset could not be loaded.");
@@ -230,6 +238,7 @@ export function mountWorld(
     );
     sprite.scale.set(2.5, 0.55, 1);
     sprite.renderOrder = 10;
+    sprite.userData.screenLabel = true;
     return sprite;
   }
   function clickable(object: THREE.Object3D, action: () => void) {
@@ -291,14 +300,20 @@ export function mountWorld(
     });
     return pet;
   }
+  // shortcut: Non-dog species share their supplied shape across finishes; add artist variants when supplied.
   async function petModel(memorial: Memorial) {
-    return load(
+    const path =
       "/models/" +
-        (memorial.species === "dog"
-          ? "pet_dog_" + (memorial.style === "photo" ? "photo" : "stylized")
-          : "pet_" + memorial.species) +
-        ".glb",
-    );
+      (memorial.species === "dog"
+        ? "pet_dog_" + (memorial.style === "photo" ? "photo" : "stylized")
+        : "pet_" + memorial.species) +
+      ".glb";
+    let pending = petCache.get(path);
+    if (!pending) {
+      pending = load(path);
+      petCache.set(path, pending);
+    }
+    return (await pending).clone(true);
   }
   function plotPosition(index: number) {
     if (sceneData.plots?.[index])
@@ -511,12 +526,12 @@ export function mountWorld(
     model = environment;
     sceneData = data;
     scene.add(model);
+    renderer.shadowMap.needsUpdate = true;
     scene.add(keepsakes);
     model.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.receiveShadow = true;
         o.castShadow = true;
-        o.frustumCulled = false;
       }
     });
     addVisitor();
@@ -526,6 +541,30 @@ export function mountWorld(
         : m?.setting === "house"
           ? [-4.3, 4.3, -3.5, 5]
           : [-6, 6, -4, 6];
+    if (options.kind === "village") {
+      const extent = Math.max(
+        19,
+        ...(options.records || []).map((r) => {
+          const p = plotPosition(r.plot_index);
+          return Math.max(Math.abs(p.x), Math.abs(p.z)) + 2;
+        }),
+      );
+      worldBounds = [-extent, extent, -extent, extent];
+      camera.far = Math.max(180, extent * 4);
+      scene.fog = new THREE.Fog(
+        theme.sky,
+        Math.max(45, extent),
+        Math.max(105, extent * 3),
+      );
+      if (extent > 95) {
+        const floor = mesh(
+          new THREE.PlaneGeometry(extent * 2 + 10, extent * 2 + 10),
+          0x93a465,
+          [0, -0.04, 0],
+        );
+        floor.rotation.x = -Math.PI / 2;
+      }
+    }
     player.position.set(0, 0.06, options.kind === "village" ? 7 : 3);
     if (blocked(player.position.x, player.position.z)) {
       for (let z = 4; z > 0; z -= 0.5)
@@ -571,11 +610,18 @@ export function mountWorld(
     camera.lookAt(target);
     resize();
     if (controls.enabled) controls.update();
-    entryPosition.copy(player.position);
-    entryCamera.copy(camera.position);
-    entryTarget.copy(controls.target);
+    const viewStartPosition = player.position.clone();
+    entryPosition.copy(
+      options.kind === "village"
+        ? new THREE.Vector3(0, 0.06, 7)
+        : player.position,
+    );
+    const resetDelta = entryPosition.clone().sub(player.position);
+    entryCamera.copy(camera.position).add(resetDelta);
+    entryTarget.copy(controls.target).add(resetDelta);
     entryRotation.copy(camera.quaternion);
     if (options.kind === "village") {
+      const petTasks: Promise<void>[] = [];
       for (const record of options.records || []) {
         const pos = plotPosition(record.plot_index);
         const marker = new THREE.Group();
@@ -607,20 +653,24 @@ export function mountWorld(
         halo.rotation.x = Math.PI / 2;
         halo.position.y = 0.08;
         marker.add(halo);
-        const pet = await petModel(record);
-        if (disposed) {
-          disposeTree(pet);
-          return;
-        }
-        marker.add(
-          fitSculpture(
-            pet,
-            new THREE.Box3(
-              new THREE.Vector3(-0.4, 0.08, -0.4),
-              new THREE.Vector3(0.4, 1.05, 0.4),
-            ),
-            record,
-          ),
+        petTasks.push(
+          petModel(record).then((pet) => {
+            if (disposed) {
+              disposeTree(pet);
+              return;
+            }
+            marker.add(
+              fitSculpture(
+                pet,
+                new THREE.Box3(
+                  new THREE.Vector3(-0.4, 0.08, -0.4),
+                  new THREE.Vector3(0.4, 1.05, 0.4),
+                ),
+                record,
+              ),
+            );
+            renderer.shadowMap.needsUpdate = true;
+          }),
         );
         if (record.id === options.focus) {
           select(record);
@@ -628,10 +678,13 @@ export function mountWorld(
         }
       }
       const create = label("+ Create a memorial");
+      create.userData.createLabel = true;
       create.position.set(0, 2, 7);
       create.scale.multiplyScalar(1.3);
       scene.add(create);
       clickable(create, options.onCreate);
+      await Promise.all(petTasks);
+      if (disposed) return;
     } else if (m) {
       const source = model.getObjectByName("pet_sculpture");
       if (source) {
@@ -672,18 +725,20 @@ export function mountWorld(
         texture.flipY = false;
         for (const photo of data.photos) {
           const slot = model.getObjectByName(photo.node);
-          if (slot instanceof THREE.Mesh) {
-            const mats = Array.isArray(slot.material)
-              ? slot.material
-              : [slot.material];
-            for (const mat of mats) {
-              const p = mat as THREE.MeshStandardMaterial;
-              p.map?.dispose();
+          slot?.traverse((object) => {
+            if (!(object instanceof THREE.Mesh)) return;
+            const mats = Array.isArray(object.material)
+              ? object.material
+              : [object.material];
+            for (const material of mats) {
+              const p = material as THREE.MeshStandardMaterial;
+              if (!p.map) continue;
+              p.map.dispose();
               p.map = texture;
               p.color.set(0xffffff);
               p.needsUpdate = true;
             }
-          }
+          });
         }
       }
       if (options.kind !== "sculpture") {
@@ -700,7 +755,7 @@ export function mountWorld(
       }
     }
     if (options.kind === "village") {
-      const delta = player.position.clone().sub(entryPosition);
+      const delta = player.position.clone().sub(viewStartPosition);
       camera.position.add(delta);
       controls.target.add(delta);
       controls.update();
@@ -717,9 +772,10 @@ export function mountWorld(
     renderer.setSize(w, h, false);
     const width = sceneData?.camera.width || 24;
     if (camera instanceof THREE.OrthographicCamera) {
-      camera.left = -width / 2;
-      camera.right = width / 2;
-      camera.top = (width * h) / w / 2;
+      const viewWidth = w < 700 ? (width * w) / h : width;
+      camera.left = -viewWidth / 2;
+      camera.right = viewWidth / 2;
+      camera.top = (viewWidth * h) / w / 2;
       camera.bottom = -camera.top;
     } else camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -809,7 +865,10 @@ export function mountWorld(
         (-(e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObjects(interactive, true);
+      const hits = raycaster.intersectObjects(
+        interactive.filter((object) => object.visible),
+        true,
+      );
       if (hits.length) {
         let object: THREE.Object3D | null = hits[0].object;
         while (object && !object.userData.activate) object = object.parent;
@@ -824,6 +883,20 @@ export function mountWorld(
         hasDestination.value = true;
     },
     { signal },
+  );
+  canvas.addEventListener(
+    "wheel",
+    (event) => {
+      if (options.kind !== "memorial") return;
+      event.preventDefault();
+      camera.zoom = THREE.MathUtils.clamp(
+        camera.zoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12),
+        0.6,
+        4,
+      );
+      camera.updateProjectionMatrix();
+    },
+    { passive: false, signal },
   );
   canvas.addEventListener(
     "pointercancel",
@@ -872,12 +945,26 @@ export function mountWorld(
             camera.updateProjectionMatrix();
             break;
           case "reset":
+            if (controls.enabled) {
+              controls.enableDamping = false;
+              controls.update();
+              controls.enableDamping = true;
+            }
             camera.zoom = options.kind === "village" ? 1.35 : 1;
             camera.updateProjectionMatrix();
-            player.position.set(0, 0.06, options.kind === "village" ? 7 : 3);
+            player.position.copy(entryPosition);
+            camera.position.copy(entryCamera);
+            camera.quaternion.copy(entryRotation);
+            controls.target.copy(entryTarget);
             hasDestination.value = false;
             break;
         }
+        if (
+          ["reset", "zoom-in", "zoom-out"].includes(
+            button.dataset.worldControl || "",
+          )
+        )
+          canvas.focus({ preventScroll: true });
       },
       { signal },
     );
@@ -926,13 +1013,48 @@ export function mountWorld(
         0.42 + (delta.lengthSq() ? Math.sin(time * 15) * 0.025 : 0);
     }
     if (controls.enabled) controls.update();
+    const screenWidth = host.clientWidth,
+      screenHeight = host.clientHeight;
+    scene.traverse((object) => {
+      if (!(object instanceof THREE.Sprite) || !object.userData.screenLabel)
+        return;
+      const point = object.getWorldPosition(new THREE.Vector3()),
+        ndc = point.clone().project(camera),
+        pixels = object.userData.createLabel ? 190 : 150;
+      const px = ((ndc.x + 1) * screenWidth) / 2,
+        py = ((1 - ndc.y) * screenHeight) / 2;
+      object.visible =
+        ndc.z < 1 &&
+        px > pixels / 2 + 8 &&
+        px < screenWidth - pixels / 2 - 8 &&
+        py > 24 &&
+        py < screenHeight - 32;
+      const perPixel =
+        camera instanceof THREE.PerspectiveCamera
+          ? (2 *
+              camera.position.distanceTo(point) *
+              Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) /
+            (camera.zoom * screenHeight)
+          : (camera.top - camera.bottom) / (camera.zoom * screenHeight);
+      object.scale.set(pixels * perPixel, (pixels * perPixel * 112) / 512, 1);
+    });
     renderer.render(scene, camera);
+    const width = host.clientWidth,
+      height = host.clientHeight;
     for (const item of labels) {
       const p = item.position.clone().project(camera);
+      const x = (p.x + 1) * 0.5 * width,
+        y = (-p.y + 1) * 0.5 * height;
+      const halfWidth =
+        Math.min(180, 40 + item.element.textContent!.length * 10) / 2;
       item.element.hidden =
-        Math.abs(p.x) > 1.1 || Math.abs(p.y) > 1.1 || p.z > 1;
-      item.element.style.left = (p.x + 1) * 0.5 * host.clientWidth + "px";
-      item.element.style.top = (-p.y + 1) * 0.5 * host.clientHeight + "px";
+        p.z > 1 ||
+        x < halfWidth + 8 ||
+        x > width - halfWidth - 8 ||
+        y < 26 ||
+        y > height - 26;
+      item.element.style.left = (p.x + 1) * 0.5 * width + "px";
+      item.element.style.top = (-p.y + 1) * 0.5 * height + "px";
     }
     if (ready) {
       host.dataset.position = [player.position.x, player.position.z]

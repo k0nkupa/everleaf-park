@@ -99,6 +99,14 @@ async function login(
 }
 async function shot(page: Page, name: string) {
   await page.locator(".site").waitFor();
+  if (await page.locator("#world").count())
+    await page.waitForFunction(
+      () =>
+        document.getElementById("world")?.dataset.ready === "true" &&
+        Number(document.getElementById("world")?.dataset.triangles) > 1000,
+      {},
+      { timeout: 60000 },
+    );
   await page.waitForFunction(
     () => !document.getElementById("notice")?.textContent,
   );
@@ -242,7 +250,12 @@ try {
   await shot(owner, "04-candle");
   const visitor = await context();
   await visitor.goto(origin + "/#/");
-  await visitor.getByRole("link", { name: /Visit Biscuit/ }).click();
+  await visitor
+    .getByRole("button", { name: "Select Biscuit’s memorial", exact: true })
+    .click();
+  await visitor
+    .getByRole("button", { name: "Enter Stillwater", exact: true })
+    .click();
   await visitor.locator(".scene-layout").waitFor();
   await visitor
     .getByRole("link", { name: "Open memories", exact: true })

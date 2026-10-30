@@ -1,6 +1,7 @@
 {
   "status": "passed",
   "checks": [
+    "email-free session route is unavailable outside explicit preview mode",
     "single-use sign-in: Owner",
     "single-use sign-in: Alex",
     "single-use sign-in: Viewer",
