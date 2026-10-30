@@ -1,0 +1,31 @@
+{
+  "status": "passed",
+  "checks": [
+    "single-use sign-in: Owner",
+    "single-use sign-in: Alex",
+    "single-use sign-in: Viewer",
+    "single-use sign-in: Stranger",
+    "single-use sign-in: Moderator",
+    "CSRF and sign-in required for writes",
+    "private draft and invalid date boundaries",
+    "original uploaded photo preserved byte-for-byte",
+    "portrait persisted privately and stale writes rejected",
+    "corrupt upload rejected",
+    "all 12 theme/setting/sculpture combinations saved and read back",
+    "public discovery/filtering, portrait access and private references",
+    "link-only and private visibility differ",
+    "invitation bound to recipient; viewer cannot contribute",
+    "real contribution upload, pending privacy and owner approval",
+    "persistent candle, duplicate prevention and anonymous attribution",
+    "moderator isolation, recorded hide action and no owner unhide bypass",
+    "moderated memorial hidden and cannot republish around review",
+    "owner ZIP export includes actual photos; other users denied",
+    "database, session, arrangement and candle survive a server restart",
+    "revocation removes private access and invalidates pending invitations",
+    "archive and restore preserve content and permissions",
+    "confirmed deletion removes database content and all stored photos",
+    "all six scene backgrounds and 28 catalogue sculpture images served"
+  ],
+  "emailsSent": 0,
+  "isolatedDatabase": true
+}

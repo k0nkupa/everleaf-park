@@ -9,3 +9,5 @@ Use the simplest local server and SQLite persistence; preserve the original prot
 No unit/Jest tests, including indirect scripts/hooks. Verify type checking, actual HTTP/database/file flows, unauthorized access boundaries, and real browser journeys. Do not substitute static prototype success text for saved/read-back results.
 
 This folder is a new dedicated Git repository because the conversation workspace had no repository. The initial import commit is the fixed point for the final two-axis code review. The user-supplied spec is this contract plus the approved draft and conversation decisions.
+
+Tony clarified: use the existing draft sculpture collection for both stylized and naturalistic/photo-style options. Do not add a photo-to-3D service or imply that uploaded portraits generate models. Resend is selected. Its key is held only in ignored local .env.
