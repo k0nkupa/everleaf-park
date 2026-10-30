@@ -1,0 +1,25 @@
+{
+  "status": "passed",
+  "checks": [
+    "browser sign-in: Jamie",
+    "real file input, browser crop, upload and saved portrait",
+    "creation, independent choices, keyboard placement, publish and reload readback",
+    "contribution file upload retains draft and saves memory through actual UI",
+    "candle lit and retained across browser reload",
+    "anonymous public discovery and memory names private until consent",
+    "browser sign-in: Alex",
+    "second account contribution waits for approval; text escaped and consent honored",
+    "browser sign-in: Viewer",
+    "invitation created in UI and accepted by its bound email account",
+    "UI role changes grant co-keeper management without permanent deletion and revoke it correctly",
+    "six approved theme/setting combinations checked through browser saves",
+    "phone viewport core routes: no horizontal overflow or broken images",
+    "archive hides public visit; restore needs explicit visibility review and publish",
+    "authenticated export produces actual ZIP download",
+    "deletion confirmation rejects wrong name and removes memorial"
+  ],
+  "pageErrors": [],
+  "emailsSent": 0,
+  "isolatedDatabase": true,
+  "nativeFileDialog": false
+}

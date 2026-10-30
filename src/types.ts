@@ -62,7 +62,7 @@ export type Memorial = {
   version: number;
   created_at: number;
   updated_at: number;
-  role: "owner" | "contributor" | "viewer" | null;
+  role: "owner" | "keeper" | "contributor" | "viewer" | null;
   portrait?: string;
   media?: Media[];
   memories?: Memory[];
@@ -77,6 +77,7 @@ export type Media = {
   filename: string;
   path: string;
   original_path: string;
+  hidden: boolean;
   bytes: number;
   created_at: number;
 };
@@ -85,11 +86,13 @@ export type Memory = {
   memorial_id: string;
   user_id: string;
   author: string;
+  show_name: boolean;
+  hidden_media_count?: number;
   title: string;
   story: string;
   date: string;
   media_ids: string[];
-  status: "pending" | "approved" | "declined" | "hidden";
+  status: "pending" | "approved" | "family" | "declined" | "hidden";
   created_at: number;
   updated_at: number;
 };
@@ -107,8 +110,9 @@ export type Member = {
   id: string;
   email: string;
   name: string;
-  role: "contributor" | "viewer";
+  role: "keeper" | "contributor" | "viewer";
   status: "invited" | "accepted";
+  expires_at?: number;
   created_at: number;
 };
 export type Report = {
@@ -124,3 +128,6 @@ export type Report = {
   memorial_name?: string;
   memory_title?: string;
 };
+
+export const canManage = (m: Pick<Memorial, "role">) =>
+  m.role === "owner" || m.role === "keeper";

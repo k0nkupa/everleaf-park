@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, writeFile, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  writeFile,
+  rm,
+  rename,
+  mkdir,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createServer } from "node:net";
@@ -357,6 +365,48 @@ try {
   });
   const publicAfter = await anon.request("/api/memorials/" + m.id);
   assert(publicAfter.memories.some((v: Memory) => v.id === memory.id));
+  assert.equal(
+    publicAfter.memories.find((v: Memory) => v.id === memory.id).author,
+    "Anonymous",
+  );
+  assert(
+    !publicAfter.contributors.some((v: { name: string }) => v.name === "Alex"),
+  );
+  await alex.request(`/api/memorials/${m.id}/memories/${memory.id}`, "PATCH", {
+    title: "Beach mornings",
+    story: "The waves and the sunny way home.",
+    date: "Summer 2019",
+    media_ids: [attached.id],
+    show_name: true,
+  });
+  await owner.request(`/api/memorials/${m.id}/memories/${memory.id}`, "PATCH", {
+    decision: "approved",
+  });
+  assert(
+    (await anon.request("/api/memorials/" + m.id)).contributors.some(
+      (v: { name: string }) => v.name === "Alex",
+    ),
+  );
+  await owner.request(`/api/memorials/${m.id}/memories/${memory.id}`, "PATCH", {
+    decision: "family",
+  });
+  assert(
+    !(await anon.request("/api/memorials/" + m.id)).memories.some(
+      (v: Memory) => v.id === memory.id,
+    ),
+  );
+  assert.equal((await fetch(origin + attached.url)).status, 404);
+  assert(
+    (await viewer.request("/api/memorials/" + m.id)).memories.some(
+      (v: Memory) => v.id === memory.id,
+    ),
+  );
+  await owner.request(`/api/memorials/${m.id}/memories/${memory.id}`, "PATCH", {
+    decision: "approved",
+  });
+  checks.push(
+    "names require consent; family-only memories and photos stay out of public visits",
+  );
   assert.equal((await fetch(origin + attached.url)).status, 200);
   checks.push("real contribution upload, pending privacy and owner approval");
   await alex.request(
@@ -391,6 +441,51 @@ try {
   await owner.request("/api/reports", "GET", undefined, 403);
   const reports = await moderator.request("/api/reports");
   const report = reports.items[0];
+  await moderator.request(
+    "/api/reports/" + report.id,
+    "PATCH",
+    { action: "hide_photo", media_id: ref.id, reason: "Invalid scope" },
+    400,
+  );
+  await moderator.request("/api/reports/" + report.id, "PATCH", {
+    action: "hide_photo",
+    media_id: attached.id,
+    reason: "Photo privacy",
+  });
+  const photoHidden = await anon.request("/api/memorials/" + m.id);
+  assert(
+    photoHidden.memories.some(
+      (v: Memory) => v.id === memory.id && v.media_ids.length === 0,
+    ),
+  );
+  assert.equal((await fetch(origin + attached.url)).status, 404);
+  await alex.request(`/api/memorials/${m.id}/memories/${memory.id}`, "PATCH", {
+    title: "Beach mornings",
+    story: "An edited story, keeping its hidden photo.",
+    media_ids: [],
+    show_name: true,
+  });
+  const edited = await owner.request("/api/memorials/" + m.id);
+  assert(
+    edited.memories
+      .find((v: Memory) => v.id === memory.id)
+      .media_ids.includes(attached.id),
+  );
+  await moderator.request("/api/reports/" + report.id, "PATCH", {
+    action: "restore_photo",
+    media_id: attached.id,
+    reason: "Photo reviewed",
+  });
+  await owner.request(`/api/memorials/${m.id}/memories/${memory.id}`, "PATCH", {
+    decision: "approved",
+  });
+  assert.equal((await fetch(origin + attached.url)).status, 200);
+  checks.push(
+    "story edits preserve hidden photo attachment for later moderation reversal",
+  );
+  checks.push(
+    "photo-only moderation is scoped, reversible and preserves the written memory",
+  );
   await moderator.request("/api/reports/" + report.id, "PATCH", {
     action: "hide_memory",
     reason: "Privacy review.",
@@ -409,6 +504,32 @@ try {
   checks.push(
     "moderator isolation, recorded hide action and no owner unhide bypass",
   );
+  await moderator.request("/api/reports/" + report.id, "PATCH", {
+    action: "restore_memory",
+    reason: "Memory reviewed",
+  });
+  assert(
+    (await anon.request("/api/memorials/" + m.id)).memories.some(
+      (v: Memory) => v.id === memory.id,
+    ),
+  );
+  await owner.request(`/api/memorials/${m.id}/memories/${memory.id}`, "PATCH", {
+    decision: "family",
+  });
+  await moderator.request("/api/reports/" + report.id, "PATCH", {
+    action: "hide_memory",
+    reason: "Family review",
+  });
+  await moderator.request("/api/reports/" + report.id, "PATCH", {
+    action: "restore_memory",
+    reason: "Family review complete",
+  });
+  assert(
+    !(await anon.request("/api/memorials/" + m.id)).memories.some(
+      (v: Memory) => v.id === memory.id,
+    ),
+  );
+  checks.push("restoring a moderated memory preserves family-only privacy");
   await moderator.request("/api/reports/" + report.id, "PATCH", {
     action: "hide_memorial",
     reason: "Memorial review.",
@@ -473,18 +594,101 @@ try {
   checks.push(
     "revocation removes private access and invalidates pending invitations",
   );
+  const ki = await owner.request(
+    `/api/memorials/${m.id}/members`,
+    "POST",
+    { email: "stranger@example.test", role: "keeper" },
+    201,
+  );
+  await stranger.request(
+    "/api/invitations/" + new URL(ki.inviteUrl).hash.split("/").at(-1),
+    "POST",
+    {},
+  );
+  let keeperView = await stranger.request("/api/memorials/" + m.id);
+  assert.equal(keeperView.role, "keeper");
+  await stranger.request(
+    `/api/memorials/${m.id}/members/${vi.id}`,
+    "PATCH",
+    { role: "keeper" },
+    403,
+  );
+  await stranger.request(
+    "/api/memorials/" + m.id,
+    "DELETE",
+    { confirm: m.name },
+    403,
+  );
+  m = await stranger.request("/api/memorials/" + m.id, "PATCH", {
+    ...keeperView,
+    message: "Kept by family.",
+  });
+  await owner.request(`/api/memorials/${m.id}/members/${vi.id}`, "PATCH", {
+    role: "contributor",
+  });
+  await owner.request(`/api/memorials/${m.id}/members/${vi.id}`, "PATCH", {
+    role: "viewer",
+  });
+  checks.push(
+    "co-keeper can manage; only original owner grants co-keepers or deletes memorial",
+  );
   await patch({ status: "archived" });
+  await owner.request(
+    `/api/memorials/${m.id}/memories`,
+    "POST",
+    { title: "Paused", story: "Paused", media_ids: [] },
+    403,
+  );
+  await owner.request(
+    `/api/memorials/${m.id}/candles`,
+    "POST",
+    { message: "Paused", anonymous: true },
+    403,
+  );
+  await stranger.request("/api/memorials/" + m.id);
+  await viewer.request("/api/memorials/" + m.id, "GET", undefined, 404);
+  await owner.request(
+    "/api/memorials/" + m.id,
+    "PATCH",
+    { ...m, status: "published" },
+    400,
+  );
+  await patch({ status: "draft" });
   await viewer.request("/api/memorials/" + m.id, "GET", undefined, 404);
   await patch({ status: "published" });
   await viewer.request("/api/memorials/" + m.id);
-  checks.push("archive and restore preserve content and permissions");
+  checks.push(
+    "archive pauses all contributions; restore stays unpublished until visibility review",
+  );
   await owner.request(
     "/api/memorials/" + m.id,
     "DELETE",
     { confirm: "Wrong name" },
     400,
   );
-  await owner.request("/api/memorials/" + m.id, "DELETE", { confirm: m.name });
+  const originals = await readdir(resolve(scratch, "media"));
+  const blocked =
+    originals.find(
+      (name) => name.startsWith(file.id) && name.includes("original"),
+    ) || originals[0];
+  const blockedPath = resolve(scratch, "media", blocked),
+    backup = resolve(scratch, "blocked-backup");
+  await rename(blockedPath, backup);
+  await mkdir(blockedPath);
+  const deleted = await owner.request("/api/memorials/" + m.id, "DELETE", {
+    confirm: m.name,
+  });
+  assert.equal(deleted.cleanupPending, true);
+  assert((await owner.request("/api/cleanup")).pending > 0);
+  await stop();
+  await start();
+  assert((await owner.request("/api/cleanup")).pending > 0);
+  await rm(blockedPath, { recursive: true });
+  await rename(backup, blockedPath);
+  assert.equal((await owner.request("/api/cleanup", "POST")).pending, 0);
+  checks.push(
+    "failed photo unlink remains queued across restart and retries successfully",
+  );
   await owner.request("/api/memorials/" + m.id, "GET", undefined, 404);
   assert.equal((await readdir(resolve(scratch, "media"))).length, 0);
   checks.push(

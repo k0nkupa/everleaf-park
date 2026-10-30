@@ -11,3 +11,5 @@ No unit/Jest tests, including indirect scripts/hooks. Verify type checking, actu
 This folder is a new dedicated Git repository because the conversation workspace had no repository. The initial import commit is the fixed point for the final two-axis code review. The user-supplied spec is this contract plus the approved draft and conversation decisions.
 
 Tony clarified: use the existing draft sculpture collection for both stylized and naturalistic/photo-style options. Do not add a photo-to-3D service or imply that uploaded portraits generate models. Resend is selected. Its key is held only in ignored local .env.
+
+Review refinements: co-keepers share management but cannot grant/revoke other co-keepers or permanently delete the memorial. Memory attribution is opt-in; family-only decisions restrict stories and attachments. Moderation can hide only a reported photo and reverse that action without removing the story. Archive pauses all new contributions; restore creates an unpublished draft for visibility review. Failed file deletion is retained in a durable cleanup queue and reported accurately.

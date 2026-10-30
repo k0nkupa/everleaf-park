@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY,memorial_id TEXT REFERENC
 CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,report_id TEXT,action TEXT NOT NULL,reason TEXT NOT NULL,created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS mail(id TEXT PRIMARY KEY,context_id TEXT,to_email TEXT NOT NULL,subject TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS rate_limits(key TEXT PRIMARY KEY,count INTEGER NOT NULL,until_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS file_cleanup(path TEXT PRIMARY KEY,requested_by TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS public_memorials ON memorials(status,visibility,updated_at);
 CREATE INDEX IF NOT EXISTS memorial_memories ON memories(memorial_id,status);
 CREATE INDEX IF NOT EXISTS memorial_media ON media(memorial_id);
@@ -39,4 +40,19 @@ export function transaction<T>(fn: () => T): T {
     db.exec("ROLLBACK");
     throw e;
   }
+}
+
+// Additive migrations preserve existing memorials and keep names private until consent is given.
+for (const [table, definition] of [
+  ["memories", "show_name INTEGER NOT NULL DEFAULT 0"],
+  ["memories", "previous_status TEXT"],
+  ["media", "hidden INTEGER NOT NULL DEFAULT 0"],
+  ["audit", "target_id TEXT"],
+] as const) {
+  const column = definition.split(" ")[0];
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+  if (!columns.some((c) => c.name === column))
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
 }

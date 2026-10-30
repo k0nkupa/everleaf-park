@@ -1,4 +1,5 @@
 import {
+  canManage,
   THEMES,
   SPECIES,
   FINISHES,
@@ -102,7 +103,9 @@ const stepsUI = (m: Memorial, step: string) =>
 const finishActions = (label = "Save and continue") =>
   `<div class="form-actions"><button class="btn p" type="submit">${label}</button></div>`;
 const mayContribute = (m: Memorial) =>
-  m.role !== "viewer" && (m.status === "published" || m.role === "owner");
+  m.status !== "archived" &&
+  m.role !== "viewer" &&
+  (m.status === "published" || canManage(m));
 const portrait = (m: Memorial, cls = "portrait-large") =>
   m.portrait
     ? `<img class="${cls}" src="${esc(m.portrait)}" alt="Portrait of ${esc(m.name)}">`
@@ -168,7 +171,7 @@ function detailsForm(m: Partial<Memorial> = {}) {
   return `${field("Their name", "name", m.name || "", 'required maxlength="80"')}<div class="field"><label for="species">Species</label><select id="species" name="species">${options(SPECIES, m.species || "dog")}</select></div><div class="two">${field("Born (year or date)", "born", m.born || "", 'maxlength="40" placeholder="Spring 2011"')}${field("Passed (year or date)", "passed", m.passed || "", 'maxlength="40" placeholder="Autumn 2025"')}</div>${area("A short remembrance", "message", m.message || "", 'maxlength="500"')}`;
 }
 function memorialCard(m: Memorial) {
-  return `<article class="panel memorial-card t-${m.theme}"><img class="cover" src="${backdrop(m)}" alt="${esc(THEMES[m.theme].name)} ${m.setting === "house" ? "Memory House" : "Stillwater"}"><div class="copy">${m.portrait ? `<img class="portrait" src="${esc(m.portrait)}" alt="${esc(m.name)}">` : ""}<h2>${esc(m.name)}</h2><p class="small muted">${esc(SPECIES[m.species])} · ${esc([m.born, m.passed].filter(Boolean).join(" – "))}</p><p class="small">${esc(THEMES[m.theme].name)} · ${m.setting === "house" ? "Memory House" : "Stillwater"}</p>${m.status ? `<span class="badge">${esc(m.status)} · ${esc(m.visibility)}</span>` : ""}<div class="row">${link("Visit", `/m/${m.id}`, "btn p")}${m.role === "owner" ? link("Edit", `/edit/${m.id}/details`) : ""}${m.role === "owner" ? link("Settings", `/settings/${m.id}`) : ""}</div></div></article>`;
+  return `<article class="panel memorial-card t-${m.theme}"><img class="cover" src="${backdrop(m)}" alt="${esc(THEMES[m.theme].name)} ${m.setting === "house" ? "Memory House" : "Stillwater"}"><div class="copy">${m.portrait ? `<img class="portrait" src="${esc(m.portrait)}" alt="${esc(m.name)}">` : ""}<h2>${esc(m.name)}</h2><p class="small muted">${esc(SPECIES[m.species])} · ${esc([m.born, m.passed].filter(Boolean).join(" – "))}</p><p class="small">${esc(THEMES[m.theme].name)} · ${m.setting === "house" ? "Memory House" : "Stillwater"}</p>${m.status ? `<span class="badge">${esc(m.status)} · ${esc(m.visibility)}</span>` : ""}<div class="row">${link("Visit", `/m/${m.id}`, "btn p")}${canManage(m) ? link("Edit", `/edit/${m.id}/details`) : ""}${canManage(m) ? link("Settings", `/settings/${m.id}`) : ""}</div></div></article>`;
 }
 async function publicPage(query: URLSearchParams) {
   const q = query.get("q") || "",
@@ -197,8 +200,9 @@ async function publicPage(query: URLSearchParams) {
 async function homePage() {
   if (authRequired()) return "";
   const { items } = await api<{ items: Memorial[] }>("/memorials?mine=1");
+  const cleanup = await api<{ pending: number }>("/cleanup");
   return shell(
-    `<main class="content"><div class="section-heading"><h1>My memorials</h1>${link("+ New memorial", "/create", "btn p")}</div>${items.length ? `<div class="cards">${items.map((m) => `<div>${memorialCard(m)}${Number((m as unknown as { pending: number }).pending) ? `<p class="panel">${esc((m as unknown as { pending: number }).pending)} memories awaiting review. ${link("Review", `/family/${m.id}`)}</p>` : ""}</div>`).join("")}</div>` : `<section class="panel"><h2>Keep a place of their own.</h2><p>Your memorials and unfinished drafts will appear here.</p>${link("Create a memorial", "/create", "btn p")}</section>`}</main>`,
+    `<main class="content"><div class="section-heading"><h1>My memorials</h1>${link("+ New memorial", "/create", "btn p")}</div>${cleanup.pending ? `<p class="panel">${cleanup.pending} deleted photo files await cleanup. ${button("Retry photo cleanup", "retry-cleanup")}</p>` : ""}${items.length ? `<div class="cards">${items.map((m) => `<div>${memorialCard(m)}${Number((m as unknown as { pending: number }).pending) ? `<p class="panel">${esc((m as unknown as { pending: number }).pending)} memories awaiting review. ${link("Review", `/family/${m.id}`)}</p>` : ""}</div>`).join("")}</div>` : `<section class="panel"><h2>Keep a place of their own.</h2><p>Your memorials and unfinished drafts will appear here.</p>${link("Create a memorial", "/create", "btn p")}</section>`}</main>`,
   );
 }
 function loginPage(query: URLSearchParams) {
@@ -215,7 +219,7 @@ function createPage() {
 async function editPage(mid: string, step: string) {
   if (authRequired()) return "";
   const m = await loadMemorial(mid);
-  if (m.role !== "owner")
+  if (!canManage(m))
     throw new ApiError(403, "Only the owner can edit this memorial.");
   const title =
     {
@@ -355,7 +359,7 @@ async function memorialPage(mid: string, readable = false) {
     )
     .join("");
   return shell(
-    `<main class="scene-layout" style="background-image:url('${backdrop(m)}')"><section class="panel identity">${portrait(m)}<h1>${esc(m.name)}</h1><p class="muted">${esc([m.born, m.passed].filter(Boolean).join(" – "))}</p><p>${esc(m.message)}</p><p class="small">${m.status === "draft" ? "Owner preview · unpublished" : m.status === "archived" ? "Archived · owner view" : m.visibility === "public" ? "Public memorial" : m.visibility === "link" ? "Shared by link" : "Invitation only"}</p>${m.moderated ? '<p class="error">Hidden while moderation reviews it.</p>' : ""}${m.role === "owner" ? link("Edit their place", `/edit/${mid}/details`) : ""}</section><div class="scene-center" style="background-image:${innerWidth < 700 ? `url('${backdrop(m)}')` : "none"}"><figure class="sculpture-preview"><a href="#/inspect/${mid}"><img src="${img(m)}" alt="${esc(SPECIES[m.species])} memorial sculpture"><figcaption>Inspect sculpture</figcaption></a></figure>${placements}<nav class="scene-links">${mayContribute(m) ? link("Light a candle", `/candle/${mid}`, "btn p") : ""}${link("Open memories", `/album/${mid}`)}${mayContribute(m) ? link("Add a memory", `/contribute/${mid}`) : ""}</nav></div><aside class="panel tribute"><h3>Remembering together</h3><p>${memories.length} shared ${memories.length === 1 ? "memory" : "memories"} · ${candles.length} active ${candles.length === 1 ? "candle" : "candles"}</p>${candles
+    `<main class="scene-layout" style="background-image:url('${backdrop(m)}')"><section class="panel identity">${portrait(m)}<h1>${esc(m.name)}</h1><p class="muted">${esc([m.born, m.passed].filter(Boolean).join(" – "))}</p><p>${esc(m.message)}</p><p class="small">${m.status === "draft" ? "Keeper preview · unpublished" : m.status === "archived" ? "Archived · keeper view" : m.visibility === "public" ? "Public memorial" : m.visibility === "link" ? "Shared by link" : "Invitation only"}</p>${m.moderated ? '<p class="error">Hidden while moderation reviews it.</p>' : ""}${canManage(m) ? link("Edit their place", `/edit/${mid}/details`) : ""}</section><div class="scene-center" style="background-image:${innerWidth < 700 ? `url('${backdrop(m)}')` : "none"}"><figure class="sculpture-preview"><a href="#/inspect/${mid}"><img src="${img(m)}" alt="${esc(SPECIES[m.species])} memorial sculpture"><figcaption>Inspect sculpture</figcaption></a></figure>${placements}<nav class="scene-links">${mayContribute(m) ? link("Light a candle", `/candle/${mid}`, "btn p") : ""}${link("Open memories", `/album/${mid}`)}${mayContribute(m) ? link("Add a memory", `/contribute/${mid}`) : ""}</nav></div><aside class="panel tribute"><h3>Remembering together</h3><p>${memories.length} shared ${memories.length === 1 ? "memory" : "memories"} · ${candles.length} active ${candles.length === 1 ? "candle" : "candles"}</p>${candles
       .slice(0, 3)
       .map(
         (c) =>
@@ -363,17 +367,17 @@ async function memorialPage(mid: string, readable = false) {
       )
       .join(
         "",
-      )}<div class="stack">${link("Contributors", `/circle/${mid}`)}${link("Read without 3D", `/read/${mid}`)}${link("Report a concern", `/report/${mid}`)}${m.role === "owner" ? link("Family & review", `/family/${mid}`) : ""}${link("Back to the village", "/")}</div></aside></main>`,
+      )}<div class="stack">${link("Contributors", `/circle/${mid}`)}${link("Read without 3D", `/read/${mid}`)}${link("Report a concern", `/report/${mid}`)}${canManage(m) ? link("Family & review", `/family/${mid}`) : ""}${link("Back to the village", "/")}</div></aside></main>`,
     m,
   );
 }
 function memoryCard(v: Memory, m: Memorial, review = false) {
-  return `<article class="panel album-entry" id="memory-${v.id}"><h2>${esc(v.title)}</h2><p class="author">${esc(v.author)}${v.date ? " · " + esc(v.date) : ""} · ${esc(v.status)}</p>${v.media_ids.map((fid) => `<img src="/media/${fid}" alt="Photo shared with this memory">`).join("")}<p>${esc(v.story)}</p><div class="row">${v.user_id === user?.id || m.role === "owner" ? link("Edit", `/contribute/${m.id}?memory=${v.id}`) : ""}${v.user_id === user?.id || m.role === "owner" ? button("Remove", "remove-memory", "btn", `data-id="${v.id}"`) : ""}${review && v.status === "pending" ? button("Approve", "approve-memory", "btn p", `data-id="${v.id}"`) + button("Decline", "decline-memory", "btn", `data-id="${v.id}"`) : ""}${v.status === "approved" ? link("Report", `/report/${m.id}?memory=${v.id}`) : ""}</div></article>`;
+  return `<article class="panel album-entry" id="memory-${v.id}"><h2>${esc(v.title)}</h2><p class="author">${esc(v.author)}${v.date ? " · " + esc(v.date) : ""} · ${esc(v.status)}</p>${v.hidden_media_count ? '<p class="small muted">A photograph is hidden while moderation reviews it.</p>' : ""}${v.media_ids.map((fid) => `<img src="/media/${fid}" alt="Photo shared with this memory">`).join("")}<p>${esc(v.story)}</p><div class="row">${v.user_id === user?.id || canManage(m) ? link("Edit", `/contribute/${m.id}?memory=${v.id}`) : ""}${v.user_id === user?.id || canManage(m) ? button("Remove", "remove-memory", "btn", `data-id="${v.id}"`) : ""}${review && v.status === "pending" ? button("Approve", "approve-memory", "btn p", `data-id="${v.id}"`) + button("Keep private to family", "family-memory", "btn", `data-id="${v.id}"`) + button("Decline", "decline-memory", "btn", `data-id="${v.id}"`) : ""}${["approved", "family"].includes(v.status) ? link("Report", `/report/${m.id}?memory=${v.id}`) : ""}</div></article>`;
 }
 async function albumPage(mid: string) {
   const m = await loadMemorial(mid);
   return shell(
-    `<main class="content"><div class="section-heading"><div><h1>Memories of ${esc(m.name)}</h1><p class="muted">${m.role === "owner" ? "All memories, including those awaiting review." : "Stories, kept together."}</p></div><div class="row">${mayContribute(m) ? link("Add a memory", `/contribute/${mid}`, "btn p") : ""}${link("Back to their place", `/m/${mid}`)}</div></div><div class="cards">${m.memories?.length ? m.memories.map((v) => memoryCard(v, m)).join("") : '<section class="empty"><h2>No memories yet.</h2><p>Be the first to share a little moment.</p></section>'}</div></main>`,
+    `<main class="content"><div class="section-heading"><div><h1>Memories of ${esc(m.name)}</h1><p class="muted">${canManage(m) ? "All memories, including those awaiting review." : "Stories, kept together."}</p></div><div class="row">${mayContribute(m) ? link("Add a memory", `/contribute/${mid}`, "btn p") : ""}${link("Back to their place", `/m/${mid}`)}</div></div><div class="cards">${m.memories?.length ? m.memories.map((v) => memoryCard(v, m)).join("") : '<section class="empty"><h2>No memories yet.</h2><p>Be the first to share a little moment.</p></section>'}</div></main>`,
     m,
   );
 }
@@ -394,7 +398,7 @@ async function contributePage(mid: string, query: URLSearchParams) {
       )
       .join(
         "",
-      )}</div><div class="field"><label for="memory-photo">Add a photograph</label><input id="memory-photo" type="file" data-upload="album" accept="image/jpeg,image/png,image/webp"></div><p class="small muted">${m.review && m.role !== "owner" ? "The owner reviews memories before they appear." : "This memory will be visible to people who can visit the memorial."}</p>${errorBox()}${finishActions(memory ? "Save changes" : "Share memory")}</form><div class="form-actions">${link("Back to memories", `/album/${mid}`)}</div></section></main>`,
+      )}</div><div class="field"><label for="memory-photo">Add a photograph</label><input id="memory-photo" type="file" data-upload="album" accept="image/jpeg,image/png,image/webp"></div><p class="small muted">${m.review && !canManage(m) ? "The owner reviews memories before they appear." : "This memory will be visible to people who can visit the memorial."}</p>${!memory || memory.user_id === user?.id ? `<label><input type="checkbox" name="show_name" ${memory?.show_name ? "checked" : ""}> Show my name to visitors</label><p class="small muted">Your name stays private unless you choose to share it. Keepers can see who submitted each memory.</p>` : ""}${errorBox()}${finishActions(memory ? "Save changes" : "Share memory")}</form><div class="form-actions">${link("Back to memories", `/album/${mid}`)}</div></section></main>`,
     m,
   );
 }
@@ -402,7 +406,7 @@ async function candlePage(mid: string) {
   const m = await loadMemorial(mid);
   const own = m.candles?.find((c) => c.user_id === user?.id);
   return shell(
-    `<main class="content narrow"><section class="panel"><h1>A light for ${esc(m.name)}</h1>${!mayContribute(m) ? "<p>Your invitation allows visits only. You can read the tributes below.</p>" : own ? `<div class="candle-glow" aria-hidden="true">🕯</div><h2>Your candle is lit.</h2><p>It stays beside ${esc(m.name)} until ${new Date(own.expires_at).toLocaleDateString()}.</p>${button("Extinguish my candle", "remove-candle", "btn", `data-id="${own.id}"`)}` : `<form id="candle-form">${area("Your words (optional)", "message", "", 'maxlength="500"')}<label><input type="checkbox" name="anonymous"> Don’t show my name</label><p class="small muted">Candles remain for seven days. Each person can keep one active candle here.</p>${errorBox()}${finishActions(user ? "Light candle" : "Sign in to light a candle")}</form>`}<div class="form-actions">${link("Return to their place", `/m/${mid}`)}</div><div class="candle-list">${(m.candles || []).map((c) => `<article><p>${esc(c.message || "A light, with love.")}</p><p class="small muted">${esc(c.author)} · ${new Date(c.created_at).toLocaleDateString()}</p>${m.role === "owner" ? button("Remove", "remove-candle", "btn", `data-id="${c.id}"`) : ""}</article>`).join("")}</div></section></main>`,
+    `<main class="content narrow"><section class="panel"><h1>A light for ${esc(m.name)}</h1>${!mayContribute(m) ? "<p>New candles and memories are paused here. You can read the tributes below.</p>" : own ? `<div class="candle-glow" aria-hidden="true">🕯</div><h2>Your candle is lit.</h2><p>It stays beside ${esc(m.name)} until ${new Date(own.expires_at).toLocaleDateString()}.</p>${button("Extinguish my candle", "remove-candle", "btn", `data-id="${own.id}"`)}` : `<form id="candle-form">${area("Your words (optional)", "message", "", 'maxlength="500"')}<label><input type="checkbox" name="anonymous"> Don’t show my name</label><p class="small muted">Candles remain for seven days. Each person can keep one active candle here.</p>${errorBox()}${finishActions(user ? "Light candle" : "Sign in to light a candle")}</form>`}<div class="form-actions">${link("Return to their place", `/m/${mid}`)}</div><div class="candle-list">${(m.candles || []).map((c) => `<article><p>${esc(c.message || "A light, with love.")}</p><p class="small muted">${esc(c.author)} · ${new Date(c.created_at).toLocaleDateString()}</p>${canManage(m) ? button("Remove", "remove-candle", "btn", `data-id="${c.id}"`) : ""}</article>`).join("")}</div></section></main>`,
     m,
   );
 }
@@ -418,17 +422,17 @@ async function familyPage(mid: string) {
         ?.filter((v) => v.status === "pending")
         .map((v) => memoryCard(v, m, true))
         .join("") || '<p class="empty">No memories awaiting review.</p>'
-    }</section><aside class="panel"><h2>People & access</h2><form id="invite-form">${field("Invite by email", "email", "", "required", "email")}<div class="field"><label for="role">Access</label><select id="role" name="role"><option value="contributor">Contributor — add memories</option><option value="viewer">Visitor — visit only</option></select></div>${errorBox()}${finishActions("Send invitation")}</form><div id="invite-result"></div>${items.map((v) => `<div class="access-row"><div class="grow"><b>${esc(v.name || v.email)}</b><p class="small muted">${esc(v.email)} · ${v.role} · ${v.status}</p></div>${button("Revoke", "revoke-member", "btn", `data-id="${v.id}"`)}</div>`).join("")}</aside></div></main>`,
+    }</section><aside class="panel"><h2>People & access</h2><form id="invite-form">${field("Invite by email", "email", "", "required", "email")}<div class="field"><label for="role">Access</label><select id="role" name="role"><option value="contributor">Contributor — add memories</option><option value="viewer">Visitor — visit only</option>${m.role === "owner" ? '<option value="keeper">Co-keeper — manage this memorial</option>' : ""}</select></div>${errorBox()}${finishActions("Send invitation")}</form><div id="invite-result"></div>${items.map((v) => `<div class="access-row"><div class="grow"><b>${esc(v.name || v.email)}</b><p class="small muted">${esc(v.email)} · ${v.role} · ${v.status}${v.status === "invited" && v.expires_at ? " · expires " + new Date(v.expires_at).toLocaleDateString() : ""}</p></div>${m.role === "owner" || v.role !== "keeper" ? `<form class="member-role-form" data-id="${v.id}"><label>Access<select name="role">${options(m.role === "owner" ? { viewer: "Visitor", contributor: "Contributor", keeper: "Co-keeper" } : { viewer: "Visitor", contributor: "Contributor" }, v.role)}</select></label><button class="btn">Save access</button></form>${v.status === "invited" ? button("Resend invitation", "resend-invite", "btn", `data-email="${esc(v.email)}" data-role="${v.role}"`) : ""}${button("Revoke", "revoke-member", "btn", `data-id="${v.id}"`)}` : ""}</div>`).join("")}</aside></div></main>`,
     m,
   );
 }
 async function settingsPage(mid: string) {
   if (authRequired()) return "";
   const m = await loadMemorial(mid);
-  if (m.role !== "owner")
+  if (!canManage(m))
     throw new ApiError(403, "Only the owner can manage this memorial.");
   return shell(
-    `<main class="content narrow"><section class="panel"><h1>Care for ${esc(m.name)}’s place.</h1><div class="stack">${link("Memorial details", `/edit/${mid}/details`)}${link("Sculpture, setting & theme", `/edit/${mid}/sculpture`)}${link("Visibility & publishing", `/edit/${mid}/publish`)}${link("People & contribution review", `/family/${mid}`)}<a class="btn" href="/api/memorials/${mid}/export">Export photos and memories (.zip)</a>${button(m.status === "archived" ? "Restore memorial" : "Archive memorial", m.status === "archived" ? "restore" : "archive")}<hr><h2>Delete this memorial</h2><p>Deletion removes the memorial, photographs, memories, candles and shared access. Export or archive first if you want to keep them.</p><form id="delete-form">${field(`Type ${esc(m.name)} to confirm`, "confirm", "", 'required autocomplete="off"')}${errorBox()}<div class="form-actions"><button class="btn danger" type="submit">Delete permanently</button></div></form></div></section></main>`,
+    `<main class="content narrow"><section class="panel"><h1>Care for ${esc(m.name)}’s place.</h1><div class="stack">${link("Memorial details", `/edit/${mid}/details`)}${link("Sculpture, setting & theme", `/edit/${mid}/sculpture`)}${link("Visibility & publishing", `/edit/${mid}/publish`)}${link("People & contribution review", `/family/${mid}`)}<a class="btn" href="/api/memorials/${mid}/export">Export photos and memories (.zip)</a>${button(m.status === "archived" ? "Restore and review" : "Archive memorial", m.status === "archived" ? "restore" : "archive")}${m.role === "owner" ? `<hr><h2>Delete this memorial</h2><p>Deletion removes the memorial, photographs, memories, candles and shared access. Export or archive first if you want to keep them.</p><form id="delete-form">${field(`Type ${esc(m.name)} to confirm`, "confirm", "", 'required autocomplete="off"')}${errorBox()}<div class="form-actions"><button class="btn danger" type="submit">Delete permanently</button></div></form>` : ""}</div></section></main>`,
     m,
   );
 }
@@ -443,10 +447,13 @@ async function reportPage(mid: string, query: URLSearchParams) {
 async function moderationPage() {
   if (authRequired()) return "";
   const { items } = await api<{
-    items: (Report & { memory_story?: string })[];
+    items: (Report & {
+      memory_story?: string;
+      media: { id: string; filename: string; hidden: boolean }[];
+    })[];
   }>("/reports");
   return shell(
-    `<main class="content"><h1>Care for the public village</h1><p class="muted">Reports and decisions</p><section class="panel" style="margin-top:22px">${items.length ? items.map((r) => `<article class="report-item"><span class="badge">${esc(r.status)}</span><h2>${esc(r.memorial_name || "Deleted memorial")}</h2><p>${esc(r.reason)} · ${esc(r.detail)}</p>${r.memory_title ? `<h3>${esc(r.memory_title)}</h3><p>${esc(r.memory_story)}</p>` : ""}${r.decision ? `<p class="success">${esc(r.decision)}</p>` : ""}<form class="moderation-form" data-id="${r.id}"><div class="field"><label>Action<select name="action">${r.memory_id ? '<option value="hide_memory">Hide memory</option><option value="remove_memory">Remove memory permanently</option>' : ""}${r.memorial_id ? '<option value="hide_memorial">Hide memorial from visitors</option><option value="restore_memorial">Restore memorial visibility</option>' : ""}<option value="dismiss">Dismiss report</option></select></label></div>${area("Decision reason", "reason", "", 'required maxlength="2000"')}${errorBox()}${finishActions("Record decision")}</form></article>`).join("") : "<p>No reports to review.</p>"}</section></main>`,
+    `<main class="content"><h1>Care for the public village</h1><p class="muted">Reports and decisions</p><section class="panel" style="margin-top:22px">${items.length ? items.map((r) => `<article class="report-item"><span class="badge">${esc(r.status)}</span><h2>${esc(r.memorial_name || "Deleted memorial")}</h2><p>${esc(r.reason)} · ${esc(r.detail)}</p>${r.memory_title ? `<h3>${esc(r.memory_title)}</h3><p>${esc(r.memory_story)}</p>` : ""}${r.decision ? `<p class="success">${esc(r.decision)}</p>` : ""}<form class="moderation-form" data-id="${r.id}"><div class="field"><label>Action<select name="action">${r.memory_id ? '<option value="hide_memory">Hide memory</option><option value="restore_memory">Restore memory</option><option value="remove_memory">Remove memory permanently</option>' : ""}${r.media.length ? '<option value="hide_photo">Hide photograph only</option><option value="restore_photo">Restore photograph</option>' : ""}${r.memorial_id ? '<option value="hide_memorial">Hide memorial from visitors</option><option value="restore_memorial">Restore memorial visibility</option>' : ""}<option value="dismiss">Dismiss report</option></select></label></div>${r.media.length ? `<label>Reported photograph<select name="media_id">${r.media.map((f) => `<option value="${f.id}">${esc(f.filename)}${f.hidden ? " (hidden)" : ""}</option>`).join("")}</select></label><div class="media-grid">${r.media.map((f) => `<img class="media-tile" src="/media/${f.id}" alt="${esc(f.filename)}">`).join("")}</div>` : ""}${area("Decision reason", "reason", "", 'required maxlength="2000"')}${errorBox()}${finishActions("Record decision")}</form></article>`).join("") : "<p>No reports to review.</p>"}</section></main>`,
   );
 }
 async function invitePage(value: string) {
@@ -468,7 +475,7 @@ async function circlePage(mid: string) {
 async function inspectPage(mid: string) {
   const m = await loadMemorial(mid);
   return shell(
-    `<main class="content narrow"><section class="panel"><h1>${esc(m.name)}’s sculpture</h1><img class="sculpture" src="${img(m)}" alt="${esc(SPECIES[m.species])} ${m.style === "photo" ? "naturalistic" : esc(FINISHES[m.finish])} sculpture"><p class="collection-note">A still memorial sculpture from the ${m.style === "photo" ? "naturalistic" : "stylized"} collection.</p><div class="form-actions">${link("Return to their place", `/m/${mid}`)}${m.role === "owner" ? link("Choose sculpture", `/edit/${mid}/sculpture`, "btn p") : ""}</div></section></main>`,
+    `<main class="content narrow"><section class="panel"><h1>${esc(m.name)}’s sculpture</h1><img class="sculpture" src="${img(m)}" alt="${esc(SPECIES[m.species])} ${m.style === "photo" ? "naturalistic" : esc(FINISHES[m.finish])} sculpture"><p class="collection-note">A still memorial sculpture from the ${m.style === "photo" ? "naturalistic" : "stylized"} collection.</p><div class="form-actions">${link("Return to their place", `/m/${mid}`)}${canManage(m) ? link("Choose sculpture", `/edit/${mid}/sculpture`, "btn p") : ""}</div></section></main>`,
     m,
   );
 }
@@ -825,6 +832,7 @@ document.addEventListener("submit", async (event) => {
     if (form.id === "memory-form") {
       const fields = {
         ...data,
+        show_name: data.show_name === "on",
         media_ids: [
           ...form.querySelectorAll<HTMLInputElement>("[name=media]:checked"),
         ].map((e) => e.value),
@@ -855,6 +863,16 @@ document.addEventListener("submit", async (event) => {
       sessionStorage.removeItem(key);
       dirty = false;
       toast("Your candle is lit.");
+      if (location.hash === start) await render();
+      return;
+    }
+    if (form.matches(".member-role-form")) {
+      await api(
+        `/memorials/${m!.id}/members/${form.dataset.id}`,
+        "PATCH",
+        data,
+      );
+      done(`/family/${m!.id}`, "Access updated.");
       if (location.hash === start) await render();
       return;
     }
@@ -889,8 +907,17 @@ document.addEventListener("submit", async (event) => {
     }
     if (form.id === "delete-form") {
       if (!confirm(`Permanently delete ${m!.name} and its content?`)) return;
-      await api("/memorials/" + m!.id, "DELETE", data);
-      done("/home", "Memorial deleted.");
+      const result = await api<{ cleanupPending: boolean }>(
+        "/memorials/" + m!.id,
+        "DELETE",
+        data,
+      );
+      done(
+        "/home",
+        result.cleanupPending
+          ? "Memorial deleted. Photo cleanup is queued for retry."
+          : "Memorial and photo files deleted.",
+      );
       return;
     }
     if (form.matches(".moderation-form")) {
@@ -940,7 +967,35 @@ document.addEventListener("click", async (event) => {
       go("/m/" + r.memorial_id);
       return;
     }
+    if (action === "retry-cleanup") {
+      const result = await api<{ pending: number }>("/cleanup", "POST");
+      toast(
+        result.pending
+          ? "Photo cleanup is still pending. It will retry automatically."
+          : "Photo cleanup complete.",
+      );
+      await render();
+      return;
+    }
     if (!m) throw Error("Open a memorial first.");
+    if (action === "resend-invite") {
+      const result = await api<{ inviteUrl?: string }>(
+        `/memorials/${m.id}/members`,
+        "POST",
+        {
+          email: target.dataset.email,
+          role: target.dataset.role,
+        },
+      );
+      toast("Invitation resent.");
+      if (location.hash === start) {
+        await render();
+        if (result.inviteUrl)
+          document.getElementById("invite-result")!.innerHTML =
+            `<p class="success">Local invitation link:</p><div class="link-box"><a href="${esc(result.inviteUrl)}">${esc(result.inviteUrl)}</a></div>`;
+      }
+      return;
+    }
     if (action === "cancel-crop") {
       crop?.image.close();
       crop = null;
@@ -1014,9 +1069,14 @@ document.addEventListener("click", async (event) => {
       if (!confirm("Remove this memory?")) return;
       await api(`/memorials/${m.id}/memories/${target.dataset.id}`, "DELETE");
     }
-    if (action === "approve-memory" || action === "decline-memory")
+    if (["approve-memory", "decline-memory", "family-memory"].includes(action))
       await api(`/memorials/${m.id}/memories/${target.dataset.id}`, "PATCH", {
-        decision: action === "approve-memory" ? "approved" : "declined",
+        decision:
+          action === "approve-memory"
+            ? "approved"
+            : action === "family-memory"
+              ? "family"
+              : "declined",
       });
     if (action === "remove-candle")
       await api(`/memorials/${m.id}/candles/${target.dataset.id}`, "DELETE");
@@ -1034,8 +1094,15 @@ document.addEventListener("click", async (event) => {
         return;
       await api("/memorials/" + m.id, "PATCH", {
         ...memorialBody(m),
-        status: action === "archive" ? "archived" : "published",
+        status: action === "archive" ? "archived" : "draft",
       });
+      if (action === "restore") {
+        go(`/edit/${m.id}/publish`);
+        toast(
+          "Restored as a private draft. Review visibility before publishing.",
+        );
+        return;
+      }
     }
     toast("Changes saved.");
     if (location.hash === start) await render();

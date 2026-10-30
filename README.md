@@ -41,12 +41,12 @@ Without email credentials, **loopback-only development mode** displays single-us
 - Original upload files retained privately; metadata-stripped display images served according to visibility.
 - Drag/keyboard placement of supported keepsake links; saved arrangements and tab-local unsaved drafts.
 - Publish as public, link-only or invitation-only. Public search excludes private, link-only, draft, archived and moderated records.
-- Memory creation, photo attachments, editing, removal and owner approval. Pending contributions and their photos remain private.
+- Memory creation, photo attachments, editing, removal and keeper review with public, family-only or declined decisions. Pending and family-only photos follow the same privacy rules. Names appear to visitors only with the author’s consent.
 - Candles with optional anonymous attribution, seven-day expiry and one active candle per person per memorial.
-- Email-bound contributor/visitor invitations, acceptance and revocation.
-- Owner home, contribution queue, visibility settings, archive/restore and confirmed deletion.
-- Reports, moderator-only review, distinct recorded moderation actions and protection against owner republishing around moderation.
-- Owner-only ZIP export containing written content, original uploaded files and display photographs.
+- Email-bound visitor/contributor/co-keeper invitations, acceptance, role changes, expiry, resend and revocation. Only the original owner can grant or revoke co-keeper access.
+- Keeper home, contribution queue, visibility settings and archive. Archiving pauses contributions; restoring opens an unpublished draft for visibility review. Confirmed permanent deletion is restricted to the original owner. Failed photo cleanup stays queued across restarts and can be retried from the private home page.
+- Reports, moderator-only review, scoped reversible photo/memory hiding, recorded reasons and protection against republishing around moderation.
+- Keeper-only ZIP export containing written content, original uploaded files and display photographs.
 - Responsive phone layouts and readable alternatives to the spatial views.
 
 ## Scope clarification
@@ -66,7 +66,7 @@ npm run verify:browser
 
 No unit/Jest suites or hooks are used. The HTTP integration journey starts an isolated server and database, checks privacy/roles/files/actual persistence, restarts the server and verifies retained state, then removes its data. The browser journey opens temporary Chrome profiles and exercises real forms, file upload/crop, saving, public visiting, contribution review, invitations, all six theme/setting scenes, phone layouts, export and deletion.
 
-The browser check uses installed Chrome. Set `CHROME_PATH` on other machines. It drives the actual HTML file input, not the native operating-system file dialog. Verification results are in `docs/verification-*.json`; screenshots are retained outside the source checkout in the conversation’s work folder.
+The browser check uses installed Chrome. Set `CHROME_PATH` on other machines. It drives the actual HTML file input, not the native operating-system file dialog. Verification results are in `docs/verification-*.json`; selected screenshots are in `docs/screenshots/`.
 
 ## Hosting limits
 

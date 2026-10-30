@@ -1,3 +1,5 @@
+import { canManage } from "./types.ts";
+import { queueFileCleanup, retryFileCleanup, cleanupCount } from "./cleanup.ts";
 import {
   createServer,
   type IncomingMessage,
@@ -147,25 +149,25 @@ function memoryMedia(value: unknown, m: Memorial, u: User) {
     requireValue(
       file &&
         file.purpose === "album" &&
-        (file.user_id === u.id || m.role === "owner"),
+        (file.user_id === u.id || canManage(m)),
       "Choose your own memory photographs.",
     );
     return v;
   });
 }
-async function removeFiles(files: { path: string; original_path?: string }[]) {
-  for (const f of files)
-    for (const name of [f.path, f.original_path].filter((v): v is string =>
-      Boolean(v),
-    ))
-      await unlink(resolve(dataDir, "media", name)).catch(() => {});
+async function discardUploadFiles(
+  files: { path: string; original_path?: string }[],
+  userId: string,
+) {
+  transaction(() => queueFileCleanup(files, userId));
+  await retryFileCleanup(userId);
 }
 function ownedMedia(m: Memorial, u: User) {
   return many<Media>(
-    m.role === "owner"
+    canManage(m)
       ? "SELECT * FROM media WHERE memorial_id=? ORDER BY created_at"
-      : "SELECT * FROM media WHERE memorial_id=? AND user_id=? ORDER BY created_at",
-    ...(m.role === "owner" ? [m.id] : [m.id, u.id]),
+      : "SELECT * FROM media WHERE memorial_id=? AND user_id=? AND hidden=0 ORDER BY created_at",
+    ...(canManage(m) ? [m.id] : [m.id, u.id]),
   );
 }
 async function route(req: IncomingMessage, res: ServerResponse) {
@@ -181,6 +183,12 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     throw new HttpError(403, "Reload the page before submitting this request.");
   if (path === "/api/health" && method === "GET")
     return send(res, 200, { ok: true });
+  if (path === "/api/cleanup") {
+    const u = requireUser(user);
+    if (method === "POST") await retryFileCleanup(u.id);
+    if (method === "POST" || method === "GET")
+      return send(res, 200, { pending: cleanupCount(u.id) });
+  }
   if (path === "/api/session" && method === "GET")
     return send(res, 200, { user, emailConfigured, development });
   if (path === "/api/auth/request" && method === "POST") {
@@ -282,8 +290,8 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const mine = url.searchParams.get("mine") === "1";
     if (mine) {
       const u = requireUser(user);
-      const rows = many<Memorial>(
-        "SELECT DISTINCT m.* FROM memorials m LEFT JOIN members a ON a.memorial_id=m.id AND a.email=? AND a.status='accepted' WHERE m.owner_id=? OR a.id IS NOT NULL ORDER BY m.updated_at DESC",
+      const rows = many<Memorial & { member_role: string }>(
+        "SELECT DISTINCT m.*,a.role member_role FROM memorials m LEFT JOIN members a ON a.memorial_id=m.id AND a.email=? AND a.status='accepted' WHERE m.owner_id=? OR (a.id IS NOT NULL AND (a.role='keeper' OR (m.status='published' AND m.moderated=0))) ORDER BY m.updated_at DESC",
         u.email,
         u.id,
       );
@@ -293,10 +301,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           status: m.status,
           visibility: m.visibility,
           version: m.version,
-          role: m.owner_id === u.id ? "owner" : "member",
+          role: m.owner_id === u.id ? "owner" : m.member_role,
           moderated: Boolean(m.moderated),
           pending:
-            m.owner_id === u.id
+            m.owner_id === u.id || m.member_role === "keeper"
               ? one<{ n: number }>(
                   "SELECT COUNT(*) n FROM memories WHERE memorial_id=? AND status='pending'",
                   m.id,
@@ -352,10 +360,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const m = getMemorial(mid, user),
         memories = memoriesFor(m, user),
         files = user ? ownedMedia(m, user) : [];
-      const contributors = many<{ name: string }>(
-        "SELECT DISTINCT author name FROM memories WHERE memorial_id=? AND status='approved' ORDER BY author LIMIT 100",
-        mid,
-      );
+      const contributors = [
+        ...new Set(
+          memories
+            .filter(
+              (v) => v.show_name && ["approved", "family"].includes(v.status),
+            )
+            .map((v) => v.author),
+        ),
+      ].map((name) => ({ name }));
       const candles = many<Candle>(
         "SELECT * FROM candles WHERE memorial_id=? AND expires_at>? ORDER BY created_at DESC LIMIT 100",
         mid,
@@ -368,7 +381,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       }));
       return send(res, 200, {
         ...m,
-        portrait: m.portrait_id ? "/media/" + m.portrait_id : null,
+        portrait:
+          m.portrait_id &&
+          (canManage(m) ||
+            !one<{ hidden: number }>(
+              "SELECT hidden FROM media WHERE id=?",
+              m.portrait_id,
+            )?.hidden)
+            ? "/media/" + m.portrait_id
+            : null,
         media: files.map((f) => ({
           ...f,
           path: undefined,
@@ -391,6 +412,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           "publication state",
         );
       const status = b.status || m.status;
+      requireValue(
+        !(m.status === "archived" && status === "published"),
+        "Restore to a draft and review visibility before publishing.",
+      );
       if (status === "published") {
         requireValue(
           m.portrait_id,
@@ -427,6 +452,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (!action && method === "DELETE") {
       const m = owner(mid, user),
         b = await body(req);
+      if (m.role !== "owner")
+        throw new HttpError(
+          403,
+          "Only the original owner can permanently delete this memorial.",
+        );
       requireValue(
         b.confirm === m.name,
         "Type the pet’s name exactly to confirm deletion.",
@@ -434,10 +464,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const files = many<Media>("SELECT * FROM media WHERE memorial_id=?", mid);
       transaction(() => {
         run("DELETE FROM mail WHERE context_id=?", mid);
+        queueFileCleanup(files, requireUser(user).id);
         run("DELETE FROM memorials WHERE id=?", mid);
       });
-      await removeFiles(files);
-      return send(res, 200, { deleted: true });
+      await retryFileCleanup(requireUser(user).id);
+      return send(res, 200, {
+        deleted: true,
+        cleanupPending: cleanupCount(requireUser(user).id) > 0,
+      });
     }
     if (action === "media" && method === "POST") {
       const u = requireUser(user),
@@ -449,7 +483,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         ["portrait", "album", "reference"],
         "photo purpose",
       );
-      if (purpose !== "album" && m.role !== "owner")
+      if (purpose !== "album" && !canManage(m))
         throw new HttpError(
           403,
           "Only the owner can change portraits or reference photographs.",
@@ -540,15 +574,18 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           150,
           true,
         );
-      await writeFile(resolve(dataDir, "media", file), normalized, {
-        mode: 0o600,
-      });
       try {
+        await writeFile(resolve(dataDir, "media", file), normalized, {
+          mode: 0o600,
+        });
         await writeFile(resolve(dataDir, "media", original), bytes, {
           mode: 0o600,
         });
       } catch (e) {
-        await removeFiles([{ path: file, original_path: original }]);
+        await discardUploadFiles(
+          [{ path: file, original_path: original }],
+          u.id,
+        );
         throw e;
       }
       try {
@@ -574,7 +611,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
             );
         });
       } catch (e) {
-        await removeFiles([{ path: file, original_path: original }]);
+        await discardUploadFiles(
+          [{ path: file, original_path: original }],
+          u.id,
+        );
         throw e;
       }
       return send(res, 201, { id: fid, url: "/media/" + fid, purpose });
@@ -588,7 +628,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           mid,
         );
       if (!file) throw new HttpError(404, "Photo not found.");
-      if (m.role !== "owner" && file.user_id !== u.id)
+      if (!canManage(m) && file.user_id !== u.id)
         throw new HttpError(403, "You cannot remove this photo.");
       requireValue(
         file.id !== m.portrait_id || m.status !== "published",
@@ -606,10 +646,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           "UPDATE memorials SET portrait_id=NULL,version=version+1 WHERE portrait_id=?",
           file.id,
         );
+        queueFileCleanup([file], u.id);
         run("DELETE FROM media WHERE id=?", file.id);
       });
-      await removeFiles([file]);
-      return send(res, 200, { deleted: true });
+      await retryFileCleanup(u.id);
+      return send(res, 200, {
+        deleted: true,
+        cleanupPending: cleanupCount(u.id) > 0,
+      });
     }
     if (action === "portrait" && method === "POST") {
       const m = owner(mid, user),
@@ -641,13 +685,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         mediaIds = memoryMedia(b.media_ids || [], m, u),
         memoryId = id(),
         now = Date.now();
-      const status = m.role === "owner" || !m.review ? "approved" : "pending";
+      const status = canManage(m) || !m.review ? "approved" : "pending";
       run(
-        "INSERT INTO memories(id,memorial_id,user_id,author,title,story,date,media_ids,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO memories(id,memorial_id,user_id,author,show_name,title,story,date,media_ids,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         memoryId,
         mid,
         u.id,
         u.name,
+        Number(b.show_name === true),
         text(b.title, "Title", 100, true),
         text(b.story, "Memory", 10000, true),
         text(b.date || "", "Date", 60),
@@ -668,7 +713,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         );
       if (!memory) throw new HttpError(404, "Memory not found.");
       if (method === "DELETE") {
-        if (m.role !== "owner" && memory.user_id !== u.id)
+        if (!canManage(m) && memory.user_id !== u.id)
           throw new HttpError(
             403,
             "Only its author or the owner can remove this memory.",
@@ -682,7 +727,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           owner(mid, u);
           const decision = choice(
             b.decision,
-            ["approved", "declined"],
+            ["approved", "family", "declined"],
             "review decision",
           );
           requireValue(
@@ -708,7 +753,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           void deliverMail();
           return send(res, 200, { status: decision });
         }
-        if (m.role !== "owner" && memory.user_id !== u.id)
+        if (!canManage(m) && memory.user_id !== u.id)
           throw new HttpError(
             403,
             "Only its author or the owner can edit this memory.",
@@ -718,15 +763,41 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           memory.status !== "hidden",
           "This memory is hidden by moderation.",
         );
-        const mediaIds = memoryMedia(b.media_ids || [], m, u);
-        const status = m.role === "owner" || !m.review ? "approved" : "pending";
+        const hiddenIds = (
+          JSON.parse(memory.media_ids as unknown as string) as string[]
+        ).filter(
+          (fid) =>
+            one<{ hidden: number }>(
+              "SELECT hidden FROM media WHERE id=? AND memorial_id=?",
+              fid,
+              mid,
+            )?.hidden,
+        );
+        const mediaIds = [
+          ...new Set([...memoryMedia(b.media_ids || [], m, u), ...hiddenIds]),
+        ];
+        requireValue(
+          mediaIds.length <= 8,
+          "Attach up to eight photographs, including those hidden during review.",
+        );
+        const status =
+          memory.status === "family"
+            ? "family"
+            : canManage(m) || !m.review
+              ? "approved"
+              : "pending";
         run(
-          "UPDATE memories SET title=?,story=?,date=?,media_ids=?,status=?,updated_at=? WHERE id=?",
+          "UPDATE memories SET title=?,story=?,date=?,media_ids=?,status=?,show_name=?,updated_at=? WHERE id=?",
           text(b.title, "Title", 100, true),
           text(b.story, "Memory", 10000, true),
           text(b.date || "", "Date", 60),
           JSON.stringify(mediaIds),
           status,
+          Number(
+            memory.user_id === u.id
+              ? b.show_name === true
+              : Boolean(memory.show_name),
+          ),
           Date.now(),
           memory.id,
         );
@@ -773,7 +844,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           mid,
         );
       if (!c) throw new HttpError(404, "Candle not found.");
-      if (m.role !== "owner" && c.user_id !== u.id)
+      if (!canManage(m) && c.user_id !== u.id)
         throw new HttpError(
           403,
           "Only the contributor or owner can remove this candle.",
@@ -785,7 +856,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       owner(mid, user);
       return send(res, 200, {
         items: many<Member>(
-          "SELECT * FROM members WHERE memorial_id=? ORDER BY created_at",
+          "SELECT m.*,i.expires_at FROM members m LEFT JOIN invitations i ON i.member_id=m.id WHERE m.memorial_id=? ORDER BY m.created_at",
           mid,
         ),
       });
@@ -795,8 +866,17 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         m = owner(mid, u),
         b = await body(req),
         address = email(b.email),
-        role = choice(b.role, ["contributor", "viewer"], "access level");
-      requireValue(address !== u.email, "You already own this memorial.");
+        role = choice(
+          b.role,
+          ["contributor", "viewer", "keeper"],
+          "access level",
+        );
+      requireValue(
+        address !== u.email &&
+          address !==
+            one<User>("SELECT * FROM users WHERE id=?", m.owner_id)?.email,
+        "This person already manages this memorial.",
+      );
       rateLimit("invite:" + u.id, 30, 3600000);
       const value = token(),
         memberId = id();
@@ -806,6 +886,16 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           mid,
           address,
         );
+        if (old?.status === "accepted")
+          throw new HttpError(
+            409,
+            "This person already has access. Change their role instead.",
+          );
+        if ((role === "keeper" || old?.role === "keeper") && m.role !== "owner")
+          throw new HttpError(
+            403,
+            "Only the original owner can assign co-keepers.",
+          );
         if (old) run("DELETE FROM members WHERE id=?", old.id);
         run(
           "INSERT INTO members(id,memorial_id,email,role,status,created_at) VALUES(?,?,?,?,?,?)",
@@ -836,8 +926,40 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         ...(development && !emailConfigured ? { inviteUrl } : {}),
       });
     }
+    if (action.startsWith("members/") && method === "PATCH") {
+      const m = owner(mid, user),
+        member = one<Member>(
+          "SELECT * FROM members WHERE id=? AND memorial_id=?",
+          action.slice(8),
+          mid,
+        );
+      if (!member) throw new HttpError(404, "Member not found.");
+      const b = await body(req),
+        role = choice(
+          b.role,
+          ["viewer", "contributor", "keeper"],
+          "access level",
+        );
+      if ((member.role === "keeper" || role === "keeper") && m.role !== "owner")
+        throw new HttpError(
+          403,
+          "Only the original owner can change co-keeper access.",
+        );
+      run("UPDATE members SET role=? WHERE id=?", role, member.id);
+      return send(res, 200, { role });
+    }
     if (action.startsWith("members/") && method === "DELETE") {
-      owner(mid, user);
+      const m = owner(mid, user),
+        member = one<Member>(
+          "SELECT * FROM members WHERE id=? AND memorial_id=?",
+          action.slice(8),
+          mid,
+        );
+      if (member?.role === "keeper" && m.role !== "owner")
+        throw new HttpError(
+          403,
+          "Only the original owner can revoke a co-keeper.",
+        );
       run(
         "DELETE FROM members WHERE id=? AND memorial_id=?",
         action.slice(8),
@@ -943,7 +1065,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (memoryId)
       requireValue(
         memoriesFor(m, u).some(
-          (v) => v.id === memoryId && v.status === "approved",
+          (v) => v.id === memoryId && ["approved", "family"].includes(v.status),
         ),
         "Choose a visible memory to report.",
       );
@@ -962,10 +1084,25 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   }
   if (path === "/api/reports" && method === "GET") {
     moderation(user);
+    const reports = many<
+      Report & { media_ids: string | null; portrait_id: string | null }
+    >(
+      "SELECT r.*,m.name memorial_name,m.portrait_id,e.title memory_title,e.story memory_story,e.media_ids FROM reports r LEFT JOIN memorials m ON m.id=r.memorial_id LEFT JOIN memories e ON e.id=r.memory_id ORDER BY r.created_at DESC LIMIT 200",
+    );
     return send(res, 200, {
-      items: many<Report>(
-        "SELECT r.*,m.name memorial_name,e.title memory_title,e.story memory_story FROM reports r LEFT JOIN memorials m ON m.id=r.memorial_id LEFT JOIN memories e ON e.id=r.memory_id ORDER BY r.created_at DESC LIMIT 200",
-      ),
+      items: reports.map((r) => ({
+        ...r,
+        media: (r.memory_id
+          ? (JSON.parse(r.media_ids || "[]") as string[])
+          : r.portrait_id
+            ? [r.portrait_id]
+            : []
+        )
+          .map((fid) =>
+            one<Media>("SELECT id,filename,hidden FROM media WHERE id=?", fid),
+          )
+          .filter(Boolean),
+      })),
     });
   }
   if (path.match(/^\/api\/reports\/[a-zA-Z0-9-]+$/) && method === "PATCH") {
@@ -978,6 +1115,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         b.action,
         [
           "hide_memory",
+          "restore_memory",
+          "hide_photo",
+          "restore_photo",
           "remove_memory",
           "hide_memorial",
           "restore_memorial",
@@ -993,10 +1133,59 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       );
     if (action === "hide_memorial" || action === "restore_memorial")
       requireValue(report.memorial_id, "The memorial has been deleted.");
+    const targetMemory = report.memory_id
+      ? one<Memory & { previous_status: string | null }>(
+          "SELECT * FROM memories WHERE id=?",
+          report.memory_id,
+        )
+      : undefined;
+    let photoId: string | null = null;
+    if (action === "restore_memory")
+      requireValue(
+        targetMemory && targetMemory.status === "hidden",
+        "Choose a hidden memory to restore.",
+      );
+    if (action === "hide_photo" || action === "restore_photo") {
+      requireValue(
+        typeof b.media_id === "string",
+        "Choose the reported photograph.",
+      );
+      const file = one<Media>(
+        "SELECT * FROM media WHERE id=? AND memorial_id=?",
+        b.media_id,
+        report.memorial_id!,
+      );
+      const belongs = targetMemory
+        ? (
+            JSON.parse(targetMemory.media_ids as unknown as string) as string[]
+          ).includes(b.media_id)
+        : one<Memorial>(
+            "SELECT * FROM memorials WHERE id=?",
+            report.memorial_id!,
+          )?.portrait_id === b.media_id;
+      requireValue(
+        file && file.purpose !== "reference" && belongs,
+        "Choose a photograph attached to this reported item.",
+      );
+      photoId = file.id;
+    }
     transaction(() => {
+      if (action === "hide_photo" || action === "restore_photo")
+        run(
+          "UPDATE media SET hidden=? WHERE id=?",
+          action === "hide_photo" ? 1 : 0,
+          photoId!,
+        );
+      if (action === "restore_memory")
+        run(
+          "UPDATE memories SET status=?,previous_status=NULL,updated_at=? WHERE id=?",
+          targetMemory!.previous_status || "approved",
+          Date.now(),
+          report.memory_id!,
+        );
       if (action === "hide_memory")
         run(
-          "UPDATE memories SET status='hidden',updated_at=? WHERE id=?",
+          "UPDATE memories SET previous_status=CASE WHEN status='hidden' THEN previous_status ELSE status END,status='hidden',updated_at=? WHERE id=?",
           Date.now(),
           report.memory_id!,
         );
@@ -1015,12 +1204,13 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         rid,
       );
       run(
-        "INSERT INTO audit(id,user_id,report_id,action,reason,created_at) VALUES(?,?,?,?,?,?)",
+        "INSERT INTO audit(id,user_id,report_id,action,reason,target_id,created_at) VALUES(?,?,?,?,?,?,?)",
         id(),
         u.id,
         rid,
         action,
         reason,
+        photoId || report.memory_id || report.memorial_id,
         Date.now(),
       );
     });
@@ -1034,6 +1224,17 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           recipient.email,
           "An update about your Everleaf memorial",
           `Moderation decision: ${action.replaceAll("_", " ")}\nReason: ${reason}`,
+          report.memorial_id,
+        );
+      const reporter = one<User>(
+        "SELECT * FROM users WHERE id=?",
+        report.reporter_id,
+      );
+      if (reporter)
+        queueEmail(
+          reporter.email,
+          "Your Everleaf report was reviewed",
+          "Your report was reviewed and a decision was recorded.",
           report.memorial_id,
         );
       void deliverMail();
@@ -1122,6 +1323,9 @@ server.listen(port, host, () =>
     `Everleaf: ${origin}${development ? " (local development)" : ""}`,
   ),
 );
+void retryFileCleanup();
+const fileTimer = setInterval(() => void retryFileCleanup(), 60000);
+fileTimer.unref();
 const mailTimer = setInterval(() => void deliverMail(), 60000);
 mailTimer.unref();
 const cleanup = setInterval(() => {
@@ -1133,6 +1337,7 @@ cleanup.unref();
 for (const sig of ["SIGINT", "SIGTERM"] as const)
   process.on(sig, () => {
     clearInterval(mailTimer);
+    clearInterval(fileTimer);
     clearInterval(cleanup);
     server.close(() => {
       db.close();

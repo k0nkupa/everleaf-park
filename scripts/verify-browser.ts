@@ -199,6 +199,10 @@ try {
   );
   await shot(owner, "02-published-garden");
   await owner.getByRole("link", { name: "Add a memory", exact: true }).click();
+  assert.equal(
+    await owner.getByLabel("Show my name to visitors").isChecked(),
+    false,
+  );
   await owner.getByLabel("Title", { exact: true }).fill("Beach mornings");
   await owner
     .getByLabel("Your memory", { exact: true })
@@ -247,13 +251,21 @@ try {
     .locator(".album-entry h2")
     .filter({ hasText: "Beach mornings" })
     .waitFor();
-  checks.push("anonymous public discovery and actual saved memory visible");
+  assert(
+    (
+      await visitor.locator(".album-entry .author").first().textContent()
+    )?.includes("Anonymous"),
+  );
+  checks.push(
+    "anonymous public discovery and memory names private until consent",
+  );
   const alex = await context();
   await login(alex, "alex@example.test", "Alex", "/#/contribute/" + mid);
   await alex.getByLabel("Title", { exact: true }).fill("Sunny <morning>");
   await alex
     .getByLabel("Your memory", { exact: true })
     .fill("A second memory, kept for review.");
+  await alex.getByLabel("Show my name to visitors").check();
   await alex.getByRole("button", { name: "Share memory", exact: true }).click();
   await alex
     .locator(".album-entry h2")
@@ -275,8 +287,22 @@ try {
   await visitor
     .getByRole("heading", { name: "Sunny <morning>", exact: true })
     .waitFor();
+  assert(
+    (
+      await visitor
+        .locator(".album-entry")
+        .filter({
+          has: visitor.getByRole("heading", {
+            name: "Sunny <morning>",
+            exact: true,
+          }),
+        })
+        .locator(".author")
+        .textContent()
+    )?.includes("Alex"),
+  );
   checks.push(
-    "second account contribution hidden until owner approves; text escaped",
+    "second account contribution waits for approval; text escaped and consent honored",
   );
   await shot(owner, "05-family");
   await owner.getByLabel("Invite by email").fill("viewer@example.test");
@@ -297,6 +323,42 @@ try {
   await viewer.locator(".scene-layout").waitFor();
   checks.push(
     "invitation created in UI and accepted by its bound email account",
+  );
+  assert.equal(
+    await viewer
+      .getByRole("link", { name: "Add a memory", exact: true })
+      .count(),
+    0,
+  );
+  await owner.locator(".member-role-form select").selectOption("keeper");
+  await owner.getByRole("button", { name: "Save access", exact: true }).click();
+  await owner.getByText("Access updated.", { exact: true }).waitFor();
+  await viewer.reload();
+  await viewer
+    .getByRole("link", { name: "Edit their place", exact: true })
+    .waitFor();
+  await viewer.goto(origin + "/#/settings/" + mid);
+  await viewer
+    .getByRole("button", { name: "Archive memorial", exact: true })
+    .waitFor();
+  assert.equal(
+    await viewer
+      .getByRole("button", { name: "Delete permanently", exact: true })
+      .count(),
+    0,
+  );
+  await owner.locator(".member-role-form select").selectOption("viewer");
+  await owner.getByRole("button", { name: "Save access", exact: true }).click();
+  await viewer.goto(origin + "/#/m/" + mid);
+  await viewer.locator(".scene-layout").waitFor();
+  assert.equal(
+    await viewer
+      .getByRole("link", { name: "Edit their place", exact: true })
+      .count(),
+    0,
+  );
+  checks.push(
+    "UI role changes grant co-keeper management without permanent deletion and revoke it correctly",
   );
   for (const theme of ["A", "B", "C"])
     for (const setting of ["house", "garden"]) {
@@ -334,19 +396,33 @@ try {
     .getByRole("button", { name: "Archive memorial", exact: true })
     .click();
   await owner
-    .getByRole("button", { name: "Restore memorial", exact: true })
+    .getByRole("button", { name: "Restore and review", exact: true })
     .waitFor();
   await visitor.goto(origin + "/#/m/" + mid);
   await visitor
     .getByRole("heading", { name: "This place is not available." })
     .waitFor();
   await owner
-    .getByRole("button", { name: "Restore memorial", exact: true })
+    .getByRole("button", { name: "Restore and review", exact: true })
     .click();
+  await owner
+    .getByRole("button", { name: "Publish memorial", exact: true })
+    .waitFor();
+  await visitor.reload();
+  await visitor
+    .getByRole("heading", { name: "This place is not available." })
+    .waitFor();
+  await owner
+    .getByRole("button", { name: "Publish memorial", exact: true })
+    .click();
+  await owner.waitForURL(/#\/m\//);
+  await owner.goto(origin + "/#/settings/" + mid);
   await owner
     .getByRole("button", { name: "Archive memorial", exact: true })
     .waitFor();
-  checks.push("archive hides public visit and restores through owner controls");
+  checks.push(
+    "archive hides public visit; restore needs explicit visibility review and publish",
+  );
   const downloading = owner.waitForEvent("download");
   await owner
     .getByRole("link", { name: "Export photos and memories (.zip)" })

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { one, many, run } from "./db.ts";
 import {
   THEMES,
+  canManage,
   SPECIES,
   FINISHES,
   KEEPSAKES,
@@ -68,7 +69,7 @@ export function getMemorial(id: string, user: User | null): Memorial {
     user?.id === m.owner_id
       ? "owner"
       : user
-        ? one<{ role: "viewer" | "contributor" }>(
+        ? one<{ role: "viewer" | "contributor" | "keeper" }>(
             "SELECT role FROM members WHERE memorial_id=? AND email=? AND status='accepted'",
             id,
             user.email,
@@ -76,22 +77,24 @@ export function getMemorial(id: string, user: User | null): Memorial {
         : null;
   if (!m.role && (m.status !== "published" || m.visibility === "private"))
     throw new HttpError(404, "This memorial is private or not available.");
-  if (m.moderated && m.role !== "owner")
+  if (m.status === "draft" && !canManage(m))
+    throw new HttpError(404, "This memorial is not available.");
+  if (m.moderated && !canManage(m))
     throw new HttpError(404, "This memorial is under review.");
-  if (m.status === "archived" && m.role !== "owner")
+  if (m.status === "archived" && !canManage(m))
     throw new HttpError(404, "This memorial is resting.");
   return m;
 }
 export function owner(id: string, user: User | null) {
   const u = requireUser(user),
     m = getMemorial(id, u);
-  if (m.role !== "owner")
-    throw new HttpError(403, "Only the memorial owner can do that.");
+  if (!canManage(m))
+    throw new HttpError(403, "Only the owner or a co-keeper can do that.");
   return m;
 }
 export function canContribute(m: Memorial, user: User | null) {
   requireUser(user);
-  if (m.status !== "published" && m.role !== "owner")
+  if (m.status === "archived" || (m.status !== "published" && !canManage(m)))
     throw new HttpError(403, "This memorial is not accepting contributions.");
   if (m.role === "viewer")
     throw new HttpError(403, "Your invitation allows visits only.");
@@ -205,32 +208,79 @@ export function publicSummary(m: Memorial) {
     setting: m.setting,
     style: m.style,
     finish: m.finish,
-    portrait: m.portrait_id ? `/media/${m.portrait_id}` : null,
+    portrait:
+      m.portrait_id &&
+      !one<{ hidden: number }>(
+        "SELECT hidden FROM media WHERE id=?",
+        m.portrait_id,
+      )?.hidden
+        ? `/media/${m.portrait_id}`
+        : null,
   };
 }
 export function memoriesFor(m: Memorial, user: User | null) {
+  const manager = canManage(m),
+    family = Boolean(m.role);
+  const visible = manager
+    ? "1=1"
+    : family
+      ? "(status IN ('approved','family') OR user_id=?)"
+      : "(status='approved' OR user_id=?)";
   return many<Memory>(
-    `SELECT * FROM memories WHERE memorial_id=? AND ${m.role === "owner" ? "1=1" : "(status='approved' OR user_id=?)"} ORDER BY created_at DESC`,
-    ...(m.role === "owner" ? [m.id] : [m.id, user?.id || ""]),
-  ).map((v) => ({
-    ...v,
-    media_ids: JSON.parse(v.media_ids as unknown as string),
-  }));
+    `SELECT * FROM memories WHERE memorial_id=? AND ${visible} ORDER BY created_at DESC`,
+    ...(manager ? [m.id] : [m.id, user?.id || ""]),
+  ).map((v) => {
+    const allIds = JSON.parse(v.media_ids as unknown as string) as string[];
+    const visibleIds = manager
+      ? allIds
+      : allIds.filter(
+          (fid) =>
+            !one<{ hidden: number }>("SELECT hidden FROM media WHERE id=?", fid)
+              ?.hidden,
+        );
+    return {
+      ...v,
+      show_name: Boolean(v.show_name),
+      author:
+        v.show_name || manager || v.user_id === user?.id
+          ? v.author
+          : "Anonymous",
+      media_ids: visibleIds,
+      hidden_media_count: allIds.length - visibleIds.length,
+    };
+  });
 }
 export function allowedMedia(file: Media, user: User | null) {
-  if (user?.id === file.user_id) return;
+  if (user?.moderator && file.purpose !== "reference") {
+    const reported = many<{
+      media_ids: string | null;
+      portrait_id: string | null;
+      memory_id: string | null;
+    }>(
+      "SELECT e.media_ids,m.portrait_id,r.memory_id FROM reports r JOIN memorials m ON m.id=r.memorial_id LEFT JOIN memories e ON e.id=r.memory_id WHERE r.memorial_id=?",
+      file.memorial_id,
+    );
+    if (
+      reported.some((r) =>
+        r.memory_id
+          ? (JSON.parse(r.media_ids || "[]") as string[]).includes(file.id)
+          : r.portrait_id === file.id,
+      )
+    )
+      return;
+  }
   const m = getMemorial(file.memorial_id, user);
-  if (m.role === "owner") return;
+  if (canManage(m)) return;
+  if (file.hidden)
+    throw new HttpError(
+      404,
+      "This photograph is hidden while moderation reviews it.",
+    );
+  if (user?.id === file.user_id) return;
   if (file.purpose === "portrait" && m.portrait_id === file.id) return;
-  const approved = many<{ media_ids: string }>(
-    "SELECT media_ids FROM memories WHERE memorial_id=? AND status='approved'",
-    m.id,
-  );
   if (
     file.purpose === "album" &&
-    approved.some((v) =>
-      (JSON.parse(v.media_ids) as string[]).includes(file.id),
-    )
+    memoriesFor(m, user).some((v) => v.media_ids.includes(file.id))
   )
     return;
   throw new HttpError(404, "This photograph is private or not available.");
