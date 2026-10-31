@@ -1,4 +1,34 @@
-# Everleaf
+# Everleaf Park
+
+Everleaf: a cozy, endless 3D memorial park for pets. Walk an infinite Lantern Bloom park, light candles, leave toys and create a memorial that keeps its own plot.
+
+**Stack:** Node 24 + TypeScript server, three.js, esbuild, SQLite, Playwright verify scripts.
+
+## Quick start
+
+```sh
+npm ci
+npm run preview
+```
+
+Open http://127.0.0.1:4881/#/ (the legacy village is at `#/village`).
+
+## Checks
+
+```sh
+npm run typecheck
+npm run build
+npm run verify:integration
+npm run verify:browser
+npm run verify:park
+npm run verify:3d   # needs a real GPU
+```
+
+No license has been chosen yet; all rights reserved.
+
+---
+
+## Details
 
 A working website built from Tony’s supplied draft. Public discovery, accounts, memorial creation, uploads, publishing, memories, candles, invitations, contribution review and moderation use the same persistent backend.
 
