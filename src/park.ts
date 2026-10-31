@@ -64,7 +64,7 @@ export async function parkRoute(
       body: {
         stones: STONES,
         near,
-        free: freePlots(taken(), 12, near.i, near.j).map((p) => ({ ...p, key: plotKey(p), tile: tileKind(p.i, p.j) })),
+        free: freePlots(taken(), 16, near.i, near.j).map((p) => ({ ...p, key: plotKey(p), tile: tileKind(p.i, p.j) })),
         items: publicRows().map(summary),
       },
     };

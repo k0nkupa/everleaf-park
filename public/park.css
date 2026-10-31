@@ -115,3 +115,6 @@
   .row2{grid-template-columns:1fr}.stones{grid-template-columns:repeat(2,1fr)}
   .modal{padding:14px 16px}
 }
+.hud-coords{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font:600 13px/1 inherit;font-family:inherit;color:#fdf7ea;text-decoration:none;white-space:nowrap}
+.hud-coords b{font-variant-numeric:tabular-nums}
+.park.viewing .hud-coords{display:none}

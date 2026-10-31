@@ -1,6 +1,7 @@
 // Everleaf Park HUD: game-style controls, pet directory, 3-step planting popup and memorial close-up.
 import { mountPark, yearsLabel, type ParkHandle, type ParkMemorial } from "./park-world.ts";
 import type { User } from "./types.ts";
+import { tileKind, type GlobalPlot } from "./park-grid.ts";
 
 type Deps = {
   api<T = Record<string, unknown>>(path: string, method?: string, data?: unknown): Promise<T>;
@@ -10,7 +11,8 @@ type Deps = {
   go(path: string): void;
   toast(msg: string): void;
 };
-type ParkData = { plots: number; stones: string[]; free: number[]; items: ParkMemorial[] };
+type FreePlot = GlobalPlot & { key: string; tile: string };
+type ParkData = { stones: string[]; near: { i: number; j: number }; free: FreePlot[]; items: ParkMemorial[] };
 
 const esc = (v: unknown) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -39,7 +41,7 @@ const years = (sel: number, min = 1980) =>
 
 export type ParkUI = { show(id: string | null): void; destroy(): void };
 
-export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
+export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: boolean } = {}): ParkUI {
   root.className = "park-root";
   root.innerHTML = `
   <div class="park" id="park">
@@ -50,16 +52,17 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
         <button class="seg on" data-view="overview" aria-pressed="true">🪶 Overview</button>
         <button class="seg" data-view="close" aria-pressed="false">🔍 Up close</button>
       </div>
+      ${mode.legacy ? `<a class="hud-coords wood" href="#/">← Endless park</a>` : `<div class="hud-coords wood" id="hud-coords" aria-live="off" title="Your tile in the endless park">📍 <b>0, 0</b></div>`}
     </div>
     <div class="hud hud-tr">
       <div class="hud-clock wood"><span id="hud-sky">☀️</span><span><small id="hud-part">Daytime</small><b id="hud-time">--:--</b></span></div>
       <button class="hud-round wood" data-act="about" aria-label="About Everleaf">?</button>
       ${deps.getUser() ? `<a class="hud-round wood" href="#/home" aria-label="My memorials">👤</a>` : ""}
     </div>
-    <p class="hud-hint" id="hud-hint">Drag to look around · scroll or pinch to zoom · tap a stone to visit</p>
+    <p class="hud-hint" id="hud-hint">${mode.legacy ? "The original closed park · drag to look around" : "WASD / arrows to walk (shift runs) · drag to look · right-drag to pan · tap a stone to visit"}</p>
     <nav class="dock" aria-label="Park">
       <button class="dock-round" data-act="pets"><span class="dr-icon">📖</span><span>Pets</span></button>
-      <button class="dock-main wood" data-act="create">🌱 <span class="long">Plant a memorial</span><span class="short">Plant one</span></button>
+      <button class="dock-main wood" data-act="create"${mode.legacy ? " hidden" : ""}>🌱 <span class="long">Plant a memorial</span><span class="short">Plant one</span></button>
       <button class="dock-round" data-act="plaza"><span class="dr-icon">⛲</span><span>Plaza</span></button>
     </nav>
     <aside class="drawer parchment" id="pets" hidden aria-label="Pets in the park">
@@ -79,9 +82,20 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
   </div>`;
   const $ = <T extends HTMLElement = HTMLElement>(s: string) => root.querySelector<T>(s)!;
   const stage = $("#park-stage");
-  let data: ParkData = { plots: 48, stones: [], free: [], items: [] };
+  let data: ParkData = { stones: [], near: { i: 0, j: 0 }, free: [], items: [] };
   let selected: string | null = null;
-  const park: ParkHandle = mountPark(stage, { onSelect: (id) => deps.go("/p/" + id) });
+  let lastTile = "";
+  const park: ParkHandle = mountPark(stage, {
+    legacy: mode.legacy,
+    onSelect: (id) => deps.go("/p/" + id),
+    onMove: ({ i, j }) => {
+      const k = `${i}, ${j}`;
+      if (k === lastTile) return;
+      lastTile = k;
+      const el = root.querySelector("#hud-coords b");
+      if (el) el.textContent = k + (tileKind(i, j) === "landmark" ? " · 🏮" : "");
+    },
+  });
 
   // Clock: real local time, a gentle day-part label.
   const tickClock = () => {
@@ -94,7 +108,8 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
   const clockTimer = setInterval(tickClock, 30000);
 
   async function refresh() {
-    data = await deps.api<ParkData>("/park");
+    const c = park.center();
+    data = await deps.api<ParkData>(`/park?near=${c.i},${c.j}`);
     await park.setMemorials(data.items);
     renderList();
     if (selected) renderCard();
@@ -118,7 +133,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
       <div class="mv-actions"><button class="btn-wood green" data-act="light">🕯️ Light a candle · ${m.lights}</button><button class="btn-wood" data-act="toy">🧸 Leave a toy · ${m.toys}</button></div>
       <dl class="mv-stats"><div><dt>👣 ${m.visits}</dt><dd>visits</dd></div><div><dt>🕯️ ${m.lights}</dt><dd>candles lit</dd></div><div><dt>🧸 ${m.toys}</dt><dd>toys left</dd></div></dl>
       ${m.message ? `<h2>Their story</h2><p class="mv-story">${esc(m.message)}</p>` : ""}
-      <p class="mv-foot">Plot ${m.plot + 1} · <a href="#/m/${m.id}">Full memorial page</a></p>`;
+      <p class="mv-foot">Plot ${m.plot.k + 1} on tile ${m.plot.i}, ${m.plot.j} · <a href="#/m/${m.id}">Full memorial page</a></p>`;
   }
   async function act(action: "visit" | "light" | "toy") {
     if (!selected) return;
@@ -137,24 +152,31 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
   }
 
   // ----- create popup -----
-  type Draft = { step: number; file: File | null; photo: string; name: string; species: string; born: number; passed: number; message: string; stone: string; plot: number | null; busy: boolean; error: string };
+  type Draft = { step: number; file: File | null; photo: string; name: string; species: string; born: number; passed: number; message: string; stone: string; plot: string | null; busy: boolean; error: string };
   let draft: Draft;
   const resetDraft = () => (draft = { step: 1, file: null, photo: "", name: "", species: "dog", born: yearNow - 10, passed: yearNow, message: "", stone: "classic", plot: null, busy: false, error: "" });
   resetDraft();
   function openCreate() { resetDraft(); $("#create").hidden = false; renderCreate(); }
   function closeCreate() { $("#create").hidden = true; if (draft.photo) URL.revokeObjectURL(draft.photo); }
-  // Plot layout comes from Garmin's village_park.plots.json (Blender x/y metres); a grid is the fallback.
-  let layout: { i: number; x: number; y: number }[] = Array.from({ length: 36 }, (_, i) => ({ i, x: ((i % 6) - 2.5) * 3, y: (2.5 - Math.floor(i / 6)) * 3 }));
-  void fetch("/models/v2/village_park.plots.json").then((r) => (r.ok ? r.json() : null)).then((rows: { name: string; x: number; y: number }[] | null) => {
-    if (rows?.length) layout = rows.map((r) => ({ i: Number(r.name.replace(/\D/g, "")), x: r.x, y: r.y }));
-  }).catch(() => {});
+  // Each tile kind has Garmin's plots.json (tile-local Blender x/y metres). The picker shows the
+  // tile nearest the player that still has room, pre-picking the first free plot.
+  const layouts = new Map<string, { k: number; x: number; y: number }[]>();
+  for (const kind of ["base", "alt1", "alt2", "landmark"])
+    void fetch(`/models/v2/parks/C/park_C_${kind}.plots.json`).then((r) => (r.ok ? r.json() : null)).then((d: { plots: { name: string; x: number; y: number }[] } | null) => {
+      if (d?.plots?.length) layouts.set(kind, d.plots.map((r) => ({ k: Number(r.name.replace(/\D/g, "")), x: r.x, y: r.y })));
+    }).catch(() => {});
+  const gridLayout = (n: number) => Array.from({ length: n }, (_, k) => ({ k, x: [-6.1, -3.3, 3.3, 6.1][k % 4], y: [6.2, 3.2, -3.2, -6.2][Math.floor(k / 4) % 4] }));
   function plotMap() {
-    const free = new Set(data.free), byPlot = new Map(data.items.map((m) => [m.plot, m]));
-    const span = Math.max(...layout.map((p) => Math.max(Math.abs(p.x), Math.abs(p.y)))) + 1.6;
-    const pct = (v: number) => (50 + (v / span) * 50).toFixed(2) + "%";
-    return `<div class="plot-map" role="group" aria-label="Choose a plot"><div class="pm-plaza">⛲</div>${layout.map(({ i, x, y }) => {
-      const m = byPlot.get(i), isFree = free.has(i);
-      return `<button type="button" style="left:${pct(x)};top:${pct(-y)}" class="pm-plot${isFree ? " free" : " taken"}${draft.plot === i ? " picked" : ""}" ${isFree ? `data-plot="${i}" aria-label="Plot ${i + 1}, free"` : `disabled aria-label="Plot ${i + 1}${m ? ", " + esc(m.name) : ", taken"}"`}>${isFree ? i + 1 : m ? esc(m.name.slice(0, 1)) : "·"}</button>`;
+    const first = data.free[0];
+    if (!first) return `<p class="note">The park is full right now.</p>`;
+    const kind = tileKind(first.i, first.j);
+    const layout = layouts.get(kind) || gridLayout(kind === "landmark" ? 12 : 16);
+    const free = new Set(data.free.map((p) => p.key));
+    const byPlot = new Map(data.items.filter((m) => m.plot.i === first.i && m.plot.j === first.j).map((m) => [m.plot.k, m]));
+    const pct = (v: number) => (50 + (v / 9) * 50).toFixed(2) + "%";
+    return `<p class="note">Tile ${first.i}, ${first.j}${kind === "landmark" ? " · by the Lantern Tree" : ""}</p><div class="plot-map" role="group" aria-label="Choose a plot"><div class="pm-plaza">${kind === "landmark" ? "🏮" : "✚"}</div>${layout.map(({ k, x, y }) => {
+      const key = `${first.i}:${first.j}:${k}`, m = byPlot.get(k), isFree = free.has(key);
+      return `<button type="button" style="left:${pct(x)};top:${pct(-y)}" class="pm-plot${isFree ? " free" : " taken"}${draft.plot === key ? " picked" : ""}" ${isFree ? `data-plot="${key}" aria-label="Plot ${k + 1}, free"` : `disabled aria-label="Plot ${k + 1}${m ? ", " + esc(m.name) : ", taken"}"`}>${isFree ? k + 1 : m ? esc(m.name.slice(0, 1)) : "·"}</button>`;
     }).join("")}</div>`;
   }
   function renderCreate() {
@@ -174,7 +196,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
       body = `<div class="stones" role="radiogroup" aria-label="Gravestone style">${STONES.map(([v, l, s]) => `<button type="button" role="radio" aria-checked="${d.stone === v}" class="stone-opt${d.stone === v ? " on" : ""}" data-stone="${v}">${stoneIcon(v)}<b>${l}</b><small>${s}</small></button>`).join("")}</div>
         <div class="stone-preview">${stoneIcon(d.stone)}<div><b>${esc(d.name)}</b><span>${d.born} – ${d.passed}</span></div></div>`;
     else
-      body = `<p class="lead">Pick a free spot. Lighter plots are open.</p>${plotMap()}<p class="note">${d.plot === null ? "No plot chosen yet." : `Plot ${d.plot + 1} chosen.`}</p>`;
+      body = `<p class="lead">Pick a free spot. Lighter plots are open.</p>${plotMap()}<p class="note">${d.plot === null ? "No plot chosen yet." : `Plot ${Number(d.plot.split(":")[2]) + 1} chosen.`}</p>`;
     const next = d.step === 1 ? "Next: choose a stone →" : d.step === 2 ? "Next: choose a spot →" : d.busy ? "Planting…" : "🌱 Plant memorial";
     $("#create .modal").innerHTML = `
       <header class="m-head"><h2 id="create-title">Plant a memorial</h2><button class="x wood" data-act="close-create" aria-label="Close">✕</button></header>
@@ -213,7 +235,8 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
       const m = await deps.api<{ id: string }>("/memorials", "POST", base);
       const up = await fetch(`/api/memorials/${m.id}/media?purpose=portrait&zoom=1&x=0.5&y=0.5&filename=${encodeURIComponent(d.file!.name.slice(0, 140) || "Photo")}`, { method: "POST", headers: { "Content-Type": d.file!.type }, body: d.file! });
       if (!up.ok) throw Error((await up.json()).error || "The photo couldn’t be saved.");
-      await deps.api(`/park/${m.id}/place`, "POST", { plot: d.plot, stone: d.stone });
+      const c = park.center();
+      await deps.api(`/park/${m.id}/place`, "POST", { plot: d.plot, near: `${c.i},${c.j}`, stone: d.stone });
       const full = await deps.api<{ version: number }>("/memorials/" + m.id);
       await deps.api("/memorials/" + m.id, "PATCH", { ...base, version: full.version, status: "published" });
       closeCreate();
@@ -233,7 +256,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
       else if (!d.name) d.error = "Add their name.";
       else if (d.born > d.passed) d.error = "The first year should come before the last.";
       else { d.error = ""; d.step = 2; }
-    } else if (d.step === 2) { d.error = ""; d.step = 3; void refresh().then(renderCreate); }
+    } else if (d.step === 2) { d.error = ""; d.step = 3; void refresh().then(() => { if (draft.plot === null && data.free[0]) draft.plot = data.free[0].key; renderCreate(); }); }
     else { if (d.plot === null) d.error = "Choose a free plot."; else return void plant(); }
     renderCreate();
   }
@@ -248,7 +271,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
     if (a.view) { deps.go("/"); setView(a.view as "overview" | "close"); return; }
     if (a.species) { captureStep1(); draft.species = a.species; renderCreate(); return; }
     if (a.stone) { draft.stone = a.stone; renderCreate(); return; }
-    if (a.plot) { draft.plot = Number(a.plot); draft.error = ""; renderCreate(); return; }
+    if (a.plot) { draft.plot = a.plot; draft.error = ""; renderCreate(); return; }
     switch (a.act) {
       case "pets": $("#pets").hidden = !$("#pets").hidden; if (!$("#pets").hidden) $("#pet-search").focus(); break;
       case "close-pets": $("#pets").hidden = true; break;
@@ -256,7 +279,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
       case "close-create": closeCreate(); break;
       case "prev": draft.error = ""; draft.step--; renderCreate(); break;
       case "next": next(); break;
-      case "plaza": deps.go("/"); setView("overview"); break;
+      case "plaza": deps.go("/"); if (!mode.legacy) park.walkTo(0, -3); setView("overview"); break;
       case "back": deps.go("/"); break;
       case "about": $("#about").hidden = false; break;
       case "close-about": $("#about").hidden = true; break;

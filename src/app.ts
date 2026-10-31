@@ -15,6 +15,7 @@ import {
 import { mountWorld, type WorldHandle } from "./world.ts";
 import { mountParkUI, type ParkUI } from "./park-ui.ts";
 let park: ParkUI | null = null;
+let parkLegacy = false;
 let world: WorldHandle | null = null,
   preview = false;
 const root = document.getElementById("app")!;
@@ -539,11 +540,15 @@ function restoreForm() {
 async function render() {
   const head = route().parts;
   // The shared 3D park owns "#/" and "#/p/<id>"; it persists across those routes.
-  if (!head[0] || head[0] === "p") {
+  // "#/park-classic" keeps the old closed park (village_park.glb) as a legacy view.
+  if (!head[0] || head[0] === "p" || head[0] === "park-classic") {
     ++revision;
     world?.destroy();
     world = null;
     current = null;
+    const legacy = head[0] === "park-classic";
+    if (park && parkLegacy !== legacy) { park.destroy(); park = null; }
+    parkLegacy = legacy;
     if (!park)
       park = mountParkUI(root, {
         api,
@@ -552,10 +557,10 @@ async function render() {
         isPreview: () => preview,
         go,
         toast,
-      });
+      }, { legacy });
     document.body.dataset.route = "park";
     document.title = "Everleaf Park";
-    park.show(head[1] || null);
+    park.show(legacy ? null : head[1] || null);
     return;
   }
   park?.destroy();

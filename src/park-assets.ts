@@ -11,6 +11,7 @@ export const STONE_KEYS = ["classic", "arch", "heart", "leaf"] as const;
 export type StoneStyle = (typeof STONE_KEYS)[number];
 export type AssetKey =
   | "park"
+  | `tile_${"base" | "alt1" | "alt2" | "landmark"}`
   | `stone_${StoneStyle}`
   | "plot_base"
   | "candle"
@@ -220,7 +221,21 @@ function placeholder(key: AssetKey): THREE.Object3D {
     g.add(ball);
     return g;
   }
+  if (key.startsWith("tile_")) return placeholderTile(key === "tile_landmark");
   return buildPlaceholderPark();
+}
+// 16x16 m stand-in tile: lawn + the cross path that joins on all four sides.
+function placeholderTile(landmark: boolean) {
+  const g = new THREE.Group();
+  const lawn = mesh(new THREE.PlaneGeometry(16, 16), mat(landmark ? 0x86a052 : 0x7f9a4a, 1));
+  lawn.rotation.x = -Math.PI / 2;
+  g.add(lawn);
+  for (const r of [0, Math.PI / 2]) {
+    const p = mesh(new THREE.PlaneGeometry(2.4, 16), mat(0xd9a86a, 1));
+    p.rotation.set(-Math.PI / 2, 0, r); p.position.y = 0.01;
+    g.add(p);
+  }
+  return g;
 }
 
 // Simple park: lawn, cross paths, plaza ring, central leaf monument, lamps, benches, trees.
