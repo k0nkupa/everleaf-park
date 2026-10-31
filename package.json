@@ -10,7 +10,10 @@
     "dev": "node --env-file-if-exists=.env --experimental-strip-types src/server.ts",
     "start": "node --env-file-if-exists=.env --experimental-strip-types src/server.ts",
     "build": "esbuild src/app.ts --bundle --format=esm --target=es2022 --outfile=public/app.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm run typecheck:images",
+    "typecheck:images": "wrangler types services/image-processor/worker-configuration.d.ts --config services/image-processor/wrangler.jsonc --include-runtime false && tsc -p services/image-processor/tsconfig.json",
+    "build:images": "wrangler deploy --config services/image-processor/wrangler.jsonc --dry-run --outdir ../../dist/image-processor",
+    "verify:images": "node --env-file-if-exists=.env --experimental-strip-types scripts/verify-image-processor.ts",
     "verify:integration": "node --experimental-strip-types scripts/verify-integration.ts",
     "verify:browser": "node --experimental-strip-types scripts/verify-browser.ts",
     "preview": "bash start-preview.sh",
@@ -23,12 +26,14 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261031.1",
     "@types/archiver": "^8.0.0",
     "@types/node": "^26.6.6",
+    "@types/three": "^0.186.0",
     "esbuild": "^0.28.2",
     "playwright-core": "^1.64.1",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
-    "@types/three": "^0.186.0"
+    "wrangler": "^4.156.0"
   }
 }

@@ -1,7 +1,41 @@
 # Sites migration: compatibility checkpoint
 
-Status: first compatibility gate needs an infrastructure decision. The
-application has not been migrated or deployed. Checked on 31 October 2026.
+Status: authenticated image helper deployed and verified. The main application
+has not been migrated or deployed. Updated on 31 October 2026.
+
+## Approved image helper: implemented
+
+Tony approved creating `everleaf-image-processor` in `The Ton Le Account`.
+The Worker is deployed at
+`https://everleaf-image-processor.the-ton-le-account.workers.dev` with an Images
+binding and a server-only secret. No subscription or paid upgrade was changed.
+Anonymous requests return 401; all processing requires bearer authentication.
+
+Source and deployment configuration are in `services/image-processor/`. The
+HTTP interface is `POST /normalize?purpose=portrait|album|reference`, with
+optional portrait `zoom` (1–3), `x` and `y` (0–1). Accepted content types are
+`image/jpeg`, `image/png` and `image/webp`. The helper enforces an actual streamed
+input-byte count of 20,000,000 and a decoded-image limit of 40 million pixels.
+PNG/WebP EXIF may be at the end, so the helper buffers only this bounded input
+before making orientation explicit. Output JPEG metadata is removed while
+streaming the response; it is marked `private, no-store`.
+
+Use `IMAGE_PROCESSOR_URL` and `IMAGE_PROCESSOR_TOKEN` only on the server. The local
+values are in ignored `.env`; the deployed Worker stores the token as a secret.
+Never include it in frontend code, Git, logs or request URLs. Everleaf still uses
+its original local image pipeline until the Sites backend is migrated.
+
+`npm run verify:images` exercised the real authenticated Worker with synthetic
+fixtures. JPEG, PNG and WebP each passed all eight EXIF orientations, metadata
+removal and an off-centre zoomed crop comparison against the existing Sharp
+pipeline. Authentication, MIME type, corrupt input, crop bounds, byte limits and
+pixel limits were checked. A 20,000,000-byte input and a 40-megapixel input passed;
+inputs beyond each limit were rejected. Album aspect ratio and no-enlargement
+behavior passed. See `docs/verification-image-processor.json`.
+
+These checks prove managed normalization, not hosted R2 privacy or the migrated
+app. Those checks belong to the next end-to-end slices. The initial investigation
+below is retained as historical evidence of why this helper was needed.
 
 ## Approved direction
 
@@ -12,7 +46,8 @@ application has not been migrated or deployed. Checked on 31 October 2026.
   metadata-stripped display JPEGs and private originals. The current code accepts
   up to 25 MiB and 40 million pixels (`src/server.ts:557` and `src/server.ts:560`).
   Tony subsequently allowed a lower upload limit and asked to investigate managed
-  Cloudflare Images. No new limit has been implemented yet.
+  Cloudflare Images. The helper now enforces the lower limit; the unmigrated main
+  application still uses its original limit.
 - Verify through HTTP and browser journeys. No unit tests, Jest or application
   test hooks. Review before committing and publishing.
 
@@ -20,7 +55,7 @@ The implementation plan places image/export compatibility before migrating all
 routes. That gate found an unresolved image-processing dependency; broad backend
 changes have therefore not started. The existing local application is intact.
 
-## What was checked
+## Initial compatibility checks (before helper approval)
 
 All runtime checks used disposable, ignored `scratch/` files and fictional probe
 data. No production resources were changed. No email, personal photos or secrets
@@ -60,7 +95,7 @@ Sanitized output from the actual image-library initialization:
 {"ok":false,"error":"Worker is not defined"}
 ```
 
-## Why the image gate is blocked
+## Why the initial image gate was blocked
 
 Native `sharp` cannot simply be bundled into a Worker. The inspected alternative,
 `wasm-vips`, does support demand-driven streaming: a large image does not always
@@ -82,7 +117,7 @@ not been established. Do not add an undocumented binding to the Site manifest.
 Browser-only image processing is not a substitute for server-side validation of
 untrusted uploads. No upload limit, privacy check or validation was weakened.
 
-## Proposed managed Images integration
+## Initial managed Images proposal (subsequently approved above)
 
 Keep the app, D1 and private R2 media on Sites. Add one small authenticated
 Cloudflare Worker in `The Ton Le Account`, proposed name
@@ -105,9 +140,10 @@ Calls to `.info()` are free. Recommend staying on Images Free, with no paid-plan
 purchase or upgrade. Worker request/CPU quotas are separate; the existing account
 subscription could not be verified through the OAuth connection.
 
-Creating this helper adds infrastructure outside the approved Sites deployment,
-so it needs Tony's decision. No Worker, binding, secret, subscription or Site was
-created or changed. The 20,000,000-byte limit is proposed, not implemented.
+At this initial checkpoint, creating a helper outside Sites awaited Tony's
+decision. No Worker, binding, secret, subscription or Site had been created or
+changed, and the 20,000,000-byte limit was only proposed. The approved helper
+implementation is recorded at the top of this document.
 
 The hosted Images REST upload alternative is less suitable: it has a 10 MB input
 limit and introduces another hosted copy; flexible variants do not support signed

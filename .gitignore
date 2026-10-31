@@ -10,3 +10,7 @@ public/app.js
 ._*
 scratch/
 public/_petlab/
+dist/
+.wrangler/
+.dev.vars
+.dev.vars.*
