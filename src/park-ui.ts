@@ -143,15 +143,19 @@ export function mountParkUI(root: HTMLElement, deps: Deps): ParkUI {
   resetDraft();
   function openCreate() { resetDraft(); $("#create").hidden = false; renderCreate(); }
   function closeCreate() { $("#create").hidden = true; if (draft.photo) URL.revokeObjectURL(draft.photo); }
+  // Plot layout comes from Garmin's village_park.plots.json (Blender x/y metres); a grid is the fallback.
+  let layout: { i: number; x: number; y: number }[] = Array.from({ length: 36 }, (_, i) => ({ i, x: ((i % 6) - 2.5) * 3, y: (2.5 - Math.floor(i / 6)) * 3 }));
+  void fetch("/models/v2/village_park.plots.json").then((r) => (r.ok ? r.json() : null)).then((rows: { name: string; x: number; y: number }[] | null) => {
+    if (rows?.length) layout = rows.map((r) => ({ i: Number(r.name.replace(/\D/g, "")), x: r.x, y: r.y }));
+  }).catch(() => {});
   function plotMap() {
     const free = new Set(data.free), byPlot = new Map(data.items.map((m) => [m.plot, m]));
-    // Display order mirrors the 3D layout: row 0 / col 0 sit next to the plaza.
-    const quad = (q: number) => `<div class="pm-q">${Array.from({ length: 12 }, (_, k) => {
-      const dr = Math.floor(k / 4), dc = k % 4, row = q < 2 ? 2 - dr : dr, col = q % 2 ? dc : 3 - dc;
-      const i = q * 12 + row * 4 + col, m = byPlot.get(i), isFree = free.has(i);
-      return `<button type="button" class="pm-plot${isFree ? " free" : " taken"}${draft.plot === i ? " picked" : ""}" ${isFree ? `data-plot="${i}" aria-label="Plot ${i + 1}, free"` : `disabled aria-label="Plot ${i + 1}${m ? ", " + esc(m.name) : ", taken"}"`}>${isFree ? i + 1 : m ? esc(m.name.slice(0, 1)) : "·"}</button>`;
+    const span = Math.max(...layout.map((p) => Math.max(Math.abs(p.x), Math.abs(p.y)))) + 1.6;
+    const pct = (v: number) => (50 + (v / span) * 50).toFixed(2) + "%";
+    return `<div class="plot-map" role="group" aria-label="Choose a plot"><div class="pm-plaza">⛲</div>${layout.map(({ i, x, y }) => {
+      const m = byPlot.get(i), isFree = free.has(i);
+      return `<button type="button" style="left:${pct(x)};top:${pct(-y)}" class="pm-plot${isFree ? " free" : " taken"}${draft.plot === i ? " picked" : ""}" ${isFree ? `data-plot="${i}" aria-label="Plot ${i + 1}, free"` : `disabled aria-label="Plot ${i + 1}${m ? ", " + esc(m.name) : ", taken"}"`}>${isFree ? i + 1 : m ? esc(m.name.slice(0, 1)) : "·"}</button>`;
     }).join("")}</div>`;
-    return `<div class="plot-map" role="group" aria-label="Choose a plot">${quad(0)}${quad(1)}<div class="pm-plaza">⛲ Plaza</div>${quad(2)}${quad(3)}</div>`;
   }
   function renderCreate() {
     const d = draft, together = Math.max(0, d.passed - d.born);

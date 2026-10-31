@@ -1,7 +1,7 @@
 // Everleaf Park 3D scene: one shared park, a gravestone + pet per memorial plot.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { getAsset, findAnchor, plotEmpties, defaultPlotPosition, type StoneStyle } from "./park-assets.ts";
+import { getAsset, findAnchor, plotEmpties, defaultPlotPosition, type StoneStyle, type PlotPose } from "./park-assets.ts";
 
 export type ParkMemorial = {
   id: string; name: string; species: string; born: string; passed: string; message: string;
@@ -33,6 +33,20 @@ function carvedTexture(name: string, years: string) {
   carve(years, 270, 58);
   g.strokeStyle = "rgba(40,30,22,0.45)"; g.lineWidth = 4;
   g.beginPath(); g.moveTo(170, 212); g.lineTo(342, 212); g.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+function carvedLine(text: string, aspect: number) {
+  const c = document.createElement("canvas");
+  c.width = 512; c.height = Math.round(512 * aspect);
+  const g = c.getContext("2d")!;
+  g.textAlign = "center"; g.textBaseline = "middle";
+  let size = c.height * 0.8;
+  g.font = `600 ${size}px Georgia, serif`;
+  while (g.measureText(text).width > 480 && size > 12) g.font = `600 ${(size -= 3)}px Georgia, serif`;
+  g.fillStyle = "rgba(255,255,255,0.5)"; g.fillText(text, 256, c.height / 2 + 2);
+  g.fillStyle = "rgba(38,28,20,0.88)"; g.fillText(text, 256, c.height / 2);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
@@ -80,8 +94,12 @@ export function mountPark(
   sun.shadow.normalBias = 0.03;
   scene.add(sun);
 
-  let empties = new Map<number, THREE.Vector3>();
-  const plotPosition = (i: number) => (empties.get(i) || defaultPlotPosition(i)).clone();
+  let empties = new Map<number, PlotPose>();
+  const plotPose = (i: number): PlotPose => {
+    const e = empties.get(i);
+    return e ? { pos: e.pos.clone(), quat: e.quat.clone() } : { pos: defaultPlotPosition(i), quat: new THREE.Quaternion() };
+  };
+  const plotPosition = (i: number) => plotPose(i).pos;
   const memorialRoot = new THREE.Group();
   scene.add(memorialRoot);
   const pickables: THREE.Object3D[] = [];
@@ -95,54 +113,85 @@ export function mountPark(
     park.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.receiveShadow = true; });
     scene.add(park);
     const found = plotEmpties(park);
-    if (found.size) { empties = found; void build(); }
     host.dataset.parkAsset = park.userData.placeholder ? "placeholder" : "glb";
+    if (found.size) { empties = found; void build(); }
   });
 
+  const texLoader = new THREE.TextureLoader();
+  const FACE_W: Record<string, number> = { classic: 0.52, arch: 0.49, heart: 0.6, leaf: 0.5 };
+  const TOYS = ["toy_ball", "toy_bone", "toy_yarn"] as const;
+  // A flat plane at an anchor, turned to face the stone's forward (-Z).
+  const facePlane = (w: number, h: number, map: THREE.Texture, at: THREE.Object3D) => {
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map, transparent: true, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }));
+    plane.rotation.y = Math.PI;
+    plane.position.z = -0.002;
+    at.add(plane);
+    return plane;
+  };
+  const at = (root: THREE.Object3D, name: string) => findAnchor(root, name) || root;
   async function buildOne(m: ParkMemorial) {
     const g = new THREE.Group();
-    g.position.copy(plotPosition(m.plot));
-    const [base, stone, pet] = await Promise.all([getAsset("plot_base"), getAsset(`stone_${m.stone}`), getAsset(`pet_${m.species}`)]);
-    stone.position.z = -0.45;
-    const anchor = findAnchor(stone);
-    const tex = carvedTexture(m.name, yearsLabel(m));
-    const w = (anchor?.userData.width as number) || 0.8;
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.75), new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }));
-    plate.name = "carving";
-    if (anchor) { anchor.add(plate); plate.position.z = 0.03; } else { plate.position.set(0, 0.9, 0.2); stone.add(plate); }
-    fitHeight(pet, 0.75);
-    pet.position.set(-0.45, pet.position.y + 0.1, 0.35);
-    pet.rotation.y = 0.5;
-    g.add(base, stone, pet);
-    const flowers = await getAsset("flowers");
-    flowers.position.set(0.55, 0.08, 0.3);
-    g.add(flowers);
-    for (let i = 0; i < Math.min(m.lights, 5); i++) {
-      const c = await getAsset("candle");
-      c.position.set(0.25 + i * 0.16, 0.22, -0.05);
-      c.name = "candle"; g.add(c);
+    const pose = plotPose(m.plot);
+    g.position.copy(pose.pos);
+    g.quaternion.copy(pose.quat);
+    const [stone, pet, flowers] = await Promise.all([getAsset(`stone_${m.stone}`), getAsset(`pet_${m.species}`), getAsset("flowers")]);
+    g.add(stone);
+    const w = FACE_W[m.stone] || 0.5;
+    // Engraved name and years: canvas decals on Garmin's text/years anchors.
+    const textA = findAnchor(stone, "text_anchor"), yearsA = findAnchor(stone, "years_anchor");
+    if (textA && yearsA) {
+      facePlane(w * 0.95, w * 0.24, carvedLine(m.name, 0.24), textA).name = "carving";
+      facePlane(w * 0.8, w * 0.12, carvedLine(yearsLabel(m), 0.15), yearsA).name = "carving-years";
+    } else facePlane(w, w * 0.75, carvedTexture(m.name, yearsLabel(m)), textA || stone).name = "carving";
+    const photoA = findAnchor(stone, "photo_anchor");
+    if (photoA && m.portrait) {
+      const tex = texLoader.load(m.portrait);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      facePlane(w * 0.34, w * 0.34, tex, photoA).name = "photo";
     }
+    fitHeight(pet, 0.45);
+    pet.rotation.y = Math.PI + 0.45; // face the visitor (-Z), turned slightly
+    const petA = at(stone, "pet_anchor");
+    const petHolder = new THREE.Group();
+    petHolder.add(pet);
+    petA.add(petHolder);
+    at(stone, "flower_anchor").add(flowers);
+    const candleA = at(stone, "candle_anchor");
+    for (let i = 0; i < Math.min(m.lights, 3); i++) {
+      const c = await getAsset("candle");
+      c.position.x = i * 0.14;
+      c.name = "candle";
+      if (i === 0 && lightBudget.n-- > 0) {
+        const glow = new THREE.PointLight(0xffb45a, 1.4, 2.2, 2);
+        at(c, "light_anchor").add(glow);
+      }
+      candleA.add(c);
+    }
+    const toyA = at(stone, "toy_anchor");
     for (let i = 0; i < Math.min(m.toys, 3); i++) {
-      const t = await getAsset("toy");
-      t.position.set(0.1 + i * 0.25, 0.08, 0.75);
-      t.name = "toy"; g.add(t);
+      const t = await getAsset(TOYS[i % 3]);
+      t.position.x = i * 0.22 - 0.22;
+      t.name = "toy";
+      toyA.add(t);
     }
     g.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.memorialId = m.id; } });
     g.userData.memorialId = m.id;
     return g;
   }
-  const plotCount = 48;
+  const plotCount = 36;
+  const lightBudget = { n: 8 };
   const emptyGeo = new THREE.RingGeometry(1.05, 1.25, 32);
   const emptyMat = new THREE.MeshStandardMaterial({ color: 0x6d8a3e, roughness: 1, transparent: true, opacity: 0.55 });
   let building = 0;
   async function build() {
     const n = ++building;
+    lightBudget.n = 8;
     const groups = await Promise.all(items.map(buildOne));
     if (n !== building || disposed) return;
     memorialRoot.clear(); pickables.length = 0; byId.clear();
     const used = new Set(items.map((m) => m.plot));
     for (let i = 0; i < plotCount; i++) {
-      if (used.has(i)) continue;
+      if (used.has(i) || host.dataset.parkAsset === "glb") continue;
       const ring = new THREE.Mesh(emptyGeo, emptyMat);
       ring.rotation.x = -Math.PI / 2; ring.scale.y = 0.8;
       ring.position.copy(plotPosition(i)).setY(0.03);
@@ -157,17 +206,24 @@ export function mountPark(
 
   function overviewPose() {
     const portrait = host.clientHeight > host.clientWidth;
-    return { pos: new THREE.Vector3(0, portrait ? 56 : 27, portrait ? 28 : 22), target: new THREE.Vector3(0, 0, portrait ? 1 : 0.5) };
+    return { pos: new THREE.Vector3(0, portrait ? 40 : 21, portrait ? 21 : 18), target: new THREE.Vector3(0, 0, portrait ? 0.5 : 0.5) };
   }
   function applyCamera(animate = true) {
     let pose = overviewPose();
     const g = focusId ? byId.get(focusId) : undefined;
     if (g) {
-      const p = g.position, portrait = host.clientHeight > host.clientWidth;
-      pose = { pos: new THREE.Vector3(p.x + 0.5, p.y + (portrait ? 2.9 : 1.9), p.z + (portrait ? 4.2 : 4.4)), target: new THREE.Vector3(p.x + (portrait ? 0 : 0.9), p.y + (portrait ? 0.45 : 0.8), p.z) };
-      if (portrait) pose.target.y -= 0; // card sits below; scene stays in top half via CSS height
+      const portrait = host.clientHeight > host.clientWidth;
+      const local = new THREE.Vector3(0.35, portrait ? 2.1 : 1.45, portrait ? -3.4 : -3.0).applyQuaternion(g.quaternion);
+      const target = g.position.clone().add(new THREE.Vector3(0, portrait ? 0.45 : 0.7, 0));
+      const pos = g.position.clone().add(local);
+      if (!portrait) {
+        // Shift the stone left of centre so the info card doesn't cover it.
+        const dir = target.clone().sub(pos).normalize();
+        target.add(new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(0.75));
+      }
+      pose = { pos, target };
     } else if (view === "close") {
-      pose = { pos: new THREE.Vector3(0, 7, 16), target: new THREE.Vector3(0, 0.8, 4) };
+      pose = { pos: new THREE.Vector3(0, 5, 14), target: new THREE.Vector3(0, 0.8, 3) };
     }
     goal.pos.copy(pose.pos); goal.target.copy(pose.target); goal.active = true;
     if (!animate) { camera.position.copy(goal.pos); controls.target.copy(goal.target); }
@@ -214,7 +270,7 @@ export function mountPark(
     }
     // Keep neighbouring stones from blocking the close-up.
     const focused = focusId ? byId.get(focusId) : undefined;
-    for (const g of pickables) g.visible = !focused || g === focused || g.position.distanceTo(camera.position) > 3.2;
+    for (const g of pickables) g.visible = !focused || g === focused || g.position.distanceTo(camera.position) > 2.4;
     memorialRoot.traverse((o) => { if (o.name === "flame") o.scale.y = 1.6 + Math.sin(t * 9 + o.id) * 0.25; });
     controls.update();
     renderer.render(scene, camera);

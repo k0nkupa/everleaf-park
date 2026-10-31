@@ -7,7 +7,7 @@ import { db, dataDir, one, many, run, transaction } from "./db.ts";
 import { HttpError, requireValue, requireUser, getMemorial } from "./domain.ts";
 import type { User, Memorial } from "./types.ts";
 
-export const PLOT_COUNT = 48;
+export const PLOT_COUNT = 36;
 export const STONES = ["classic", "arch", "heart", "leaf"] as const;
 export type Stone = (typeof STONES)[number];
 
@@ -102,7 +102,7 @@ const DEMOS: [string, Memorial["species"], string, string, Stone, string, string
   ["Toby", "guinea", "2020", "2024", "classic", "#a56b45", "Wheeked for every carrot."],
   ["Hazel", "dog", "2013", "2026", "heart", "#b8875a", "Best friend on the beach."],
 ];
-const DEMO_PLOTS = [3, 8, 13, 17, 22, 26, 31, 37];
+const DEMO_PLOTS = [1, 4, 8, 13, 19, 22, 28, 33];
 export async function seedDemo() {
   if (one<{ n: number }>("SELECT COUNT(*) n FROM memorials")!.n > 0) return;
   const uid = "demo-keeper", now = Date.now();

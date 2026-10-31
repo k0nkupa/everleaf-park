@@ -16,6 +16,9 @@ export type AssetKey =
   | "candle"
   | "flowers"
   | "toy"
+  | "toy_ball"
+  | "toy_bone"
+  | "toy_yarn"
   | `pet_${string}`;
 
 const loader = new GLTFLoader();
@@ -75,12 +78,17 @@ export function findAnchor(root: THREE.Object3D, name = "text_anchor") {
 }
 
 /** Garmin contract: the park GLB carries empties named plot_00..plot_NN. */
+export type PlotPose = { pos: THREE.Vector3; quat: THREE.Quaternion };
 export function plotEmpties(root: THREE.Object3D) {
-  const out = new Map<number, THREE.Vector3>();
+  const out = new Map<number, PlotPose>();
   root.updateWorldMatrix(true, true);
   root.traverse((o) => {
     const m = o.name.match(/^plot_(\d+)$/i);
-    if (m) out.set(Number(m[1]), o.getWorldPosition(new THREE.Vector3()));
+    if (m)
+      out.set(Number(m[1]), {
+        pos: o.getWorldPosition(new THREE.Vector3()),
+        quat: o.getWorldQuaternion(new THREE.Quaternion()),
+      });
   });
   return out;
 }
@@ -120,16 +128,38 @@ function stoneShape(style: StoneStyle) {
 const STONE_COLOR: Record<StoneStyle, number> = { classic: 0xb8b1a5, arch: 0xd8d0c2, heart: 0xc9a59a, leaf: 0x9fae8c };
 export const STONE_FACE_Z = 0.2;
 function placeholderStone(style: StoneStyle) {
+  // Mirrors Garmin's contract: pivot at plot centre, face points -Z, bed in front, named anchors.
+  const outer = new THREE.Group();
+  const inner = placeholderStoneBody(style);
+  inner.rotation.y = Math.PI;
+  inner.position.z = 0.45;
+  const bed = placeholder("plot_base");
+  bed.scale.setScalar(0.6);
+  bed.position.z = -0.2;
+  outer.add(bed, inner);
+  const add = (name: string, x: number, y: number, z: number) => {
+    const a = new THREE.Object3D();
+    a.name = name;
+    a.position.set(x, y, z);
+    outer.add(a);
+  };
+  const faceZ = 0.45 - STONE_FACE_Z - 0.01;
+  add("text_anchor", 0, 1.05, faceZ);
+  add("years_anchor", 0, 0.82, faceZ);
+  add("photo_anchor", 0, 1.32, faceZ);
+  add("pet_anchor", -0.3, 0.1, -0.35);
+  add("flower_anchor", 0.35, 0.1, -0.25);
+  add("candle_anchor", 0.15, 0.22, 0.05);
+  add("toy_anchor", 0.05, 0.08, -0.6);
+  return outer;
+}
+function placeholderStoneBody(style: StoneStyle) {
   const g = new THREE.Group();
   const plinth = mesh(new THREE.BoxGeometry(1.4, 0.22, 0.6), mat(0x9d968b));
   plinth.position.y = 0.11;
   const body = extrude(stoneShape(style), 0.24, STONE_COLOR[style]);
   body.position.y = style === "heart" ? 0.18 : 0.22;
-  const anchor = new THREE.Object3D();
-  anchor.name = "text_anchor";
-  anchor.position.set(0, style === "classic" ? 0.85 : style === "heart" ? 0.95 : 0.9, STONE_FACE_Z);
-  anchor.userData.width = style === "classic" ? 0.8 : 0.85;
-  g.add(plinth, body, anchor);
+  g.add(plinth, body);
   return g;
 }
 function placeholderPet(species: string) {
@@ -166,7 +196,9 @@ function placeholder(key: AssetKey): THREE.Object3D {
     wax.position.y = 0.09;
     const flame = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc45a }));
     flame.scale.y = 1.7; flame.position.y = 0.22; flame.name = "flame";
-    g.add(wax, flame);
+    const la = new THREE.Object3D();
+    la.name = "light_anchor"; la.position.y = 0.22;
+    g.add(wax, flame, la);
     return g;
   }
   if (key === "flowers") {
@@ -181,7 +213,7 @@ function placeholder(key: AssetKey): THREE.Object3D {
     }
     return g;
   }
-  if (key === "toy") {
+  if (key.startsWith("toy")) {
     const ball = mesh(new THREE.SphereGeometry(0.1, 14, 10), mat(0xe2553f, 0.5));
     ball.position.y = 0.1;
     const g = new THREE.Group();
