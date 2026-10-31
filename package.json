@@ -14,7 +14,8 @@
     "verify:integration": "node --experimental-strip-types scripts/verify-integration.ts",
     "verify:browser": "node --experimental-strip-types scripts/verify-browser.ts",
     "preview": "bash start-preview.sh",
-    "verify:3d": "node --experimental-strip-types scripts/verify-3d.ts"
+    "verify:3d": "node --experimental-strip-types scripts/verify-3d.ts",
+    "verify:park": "node --experimental-strip-types scripts/verify-park.ts"
   },
   "dependencies": {
     "archiver": "^8.0.0",

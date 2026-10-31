@@ -249,7 +249,7 @@ try {
   checks.push("candle lit and retained across browser reload");
   await shot(owner, "04-candle");
   const visitor = await context();
-  await visitor.goto(origin + "/#/");
+  await visitor.goto(origin + "/#/village");
   await visitor
     .getByRole("button", { name: "Select Biscuit’s memorial", exact: true })
     .click();
@@ -389,7 +389,7 @@ try {
   );
   await owner.setViewportSize({ width: 390, height: 844 });
   for (const [name, path] of [
-    ["village", "/"],
+    ["village", "/village"],
     ["visit", "/m/" + mid],
     ["album", "/album/" + mid],
     ["settings", "/settings/" + mid],

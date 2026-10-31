@@ -11,6 +11,7 @@ import { resolve, extname, sep } from "node:path";
 import sharp from "sharp";
 import { ZipArchive } from "archiver";
 import { db, dataDir, one, many, run, transaction } from "./db.ts";
+import { parkRoute, seedDemo } from "./park.ts";
 import { emailConfigured, queueEmail, deliverMail } from "./mail.ts";
 import {
   HttpError,
@@ -324,6 +325,17 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (v) run("DELETE FROM sessions WHERE hash=?", hash(v));
     res.setHeader("Set-Cookie", cookie("", 0));
     return send(res, 200, { ok: true });
+  }
+  const park = await parkRoute(
+    path,
+    method,
+    user,
+    hash(ip + (req.headers["user-agent"] || "")),
+    () => body(req),
+  );
+  if (park) {
+    if (method === "POST") rateLimit("park:" + ip, 300, 3600000);
+    return send(res, park.status, park.body);
   }
   if (path === "/api/memorials" && method === "GET") {
     const mine = url.searchParams.get("mine") === "1";
@@ -1366,6 +1378,7 @@ const server = createServer((req, res) => {
 });
 server.requestTimeout = 30000;
 server.headersTimeout = 15000;
+if (preview) await seedDemo();
 server.listen(port, host, () =>
   console.log(
     `Everleaf: ${origin}${development ? " (local development)" : ""}`,

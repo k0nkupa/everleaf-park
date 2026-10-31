@@ -13,6 +13,8 @@ import {
   type Placement,
 } from "./types.ts";
 import { mountWorld, type WorldHandle } from "./world.ts";
+import { mountParkUI, type ParkUI } from "./park-ui.ts";
+let park: ParkUI | null = null;
 let world: WorldHandle | null = null,
   preview = false;
 const root = document.getElementById("app")!;
@@ -71,7 +73,7 @@ async function api<T = Record<string, unknown>>(
   return b as T;
 }
 const header = (m?: Memorial) =>
-  `<header class="site-header"><a class="brand" href="#/">Everleaf</a>${m ? `<span class="small desktop-only">${esc(m.name)} · ${m.setting === "house" ? "Memory House" : "Stillwater"}</span>` : ""}<nav class="site-nav">${link("Village", "/", "")}${user ? link("My memorials", "/home", "") : link("Sign in", "/login", "")}${link("Create a memorial", "/create", "btn p")}${user?.moderator ? link("Moderation", "/moderation", "") : ""}${user ? button("Sign out", "logout", "lnk") : ""}</nav></header>`;
+  `<header class="site-header"><a class="brand" href="#/">Everleaf</a>${m ? `<span class="small desktop-only">${esc(m.name)} · ${m.setting === "house" ? "Memory House" : "Stillwater"}</span>` : ""}<nav class="site-nav">${link("Park", "/", "")}${user ? link("My memorials", "/home", "") : link("Sign in", "/login", "")}${link("Create a memorial", "/create", "btn p")}${user?.moderator ? link("Moderation", "/moderation", "") : ""}${user ? button("Sign out", "logout", "lnk") : ""}</nav></header>`;
 const shell = (content: string, m?: Memorial) =>
   `<div class="site">${header(m)}${content}</div>`;
 const field = (
@@ -535,6 +537,29 @@ function restoreForm() {
   } catch {}
 }
 async function render() {
+  const head = route().parts;
+  // The shared 3D park owns "#/" and "#/p/<id>"; it persists across those routes.
+  if (!head[0] || head[0] === "p") {
+    ++revision;
+    world?.destroy();
+    world = null;
+    current = null;
+    if (!park)
+      park = mountParkUI(root, {
+        api,
+        getUser: () => user,
+        setUser: (u) => (user = u),
+        isPreview: () => preview,
+        go,
+        toast,
+      });
+    document.body.dataset.route = "park";
+    document.title = "Everleaf Park";
+    park.show(head[1] || null);
+    return;
+  }
+  park?.destroy();
+  park = null;
   const n = ++revision;
   world?.destroy();
   world = null;
@@ -543,7 +568,7 @@ async function render() {
   try {
     let content = "";
     switch (p[0] || "") {
-      case "":
+      case "village":
       case "search":
         content = await publicPage(q);
         break;

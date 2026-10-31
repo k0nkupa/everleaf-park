@@ -1,0 +1,8 @@
+{
+  "origin": "http://127.0.0.1:4881",
+  "checks": [
+    "1280px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back",
+    "390px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back"
+  ],
+  "at": "2026-10-31T01:14:43.450Z"
+}

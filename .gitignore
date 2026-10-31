@@ -6,3 +6,5 @@ node_modules/
 public/app.js
 *.log
 .preview-data/
+.preview-park/
+._*

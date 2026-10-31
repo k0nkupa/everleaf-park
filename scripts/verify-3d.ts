@@ -220,7 +220,7 @@ try {
     });
   });
   const owner = await page();
-  await owner.goto(origin);
+  await owner.goto(origin + "/#/village");
   await ready(owner);
   const session = await (
     await owner.request.get(origin + "/api/session")
@@ -391,7 +391,7 @@ try {
   check(
     "actual portrait upload, saved sculpture/finish, 3D keepsake arrangement, publish, named village plot and entering the house through UI",
   );
-  await owner.goto(origin);
+  await owner.goto(origin + "/#/village");
   await ready(owner);
   await owner.reload();
   await ready(owner);
@@ -417,7 +417,7 @@ try {
     "created plot persists after reload and a real world marker opens its saved memorial",
   );
   const visitor = await page();
-  await visitor.goto(origin);
+  await visitor.goto(origin + "/#/village");
   await ready(visitor);
   await visitor
     .getByRole("button", { name: "Select Biscuit’s memorial", exact: true })
@@ -488,7 +488,7 @@ try {
   await visitor
     .getByRole("heading", { name: "This place is not available." })
     .waitFor();
-  await visitor.goto(origin);
+  await visitor.goto(origin + "/#/village");
   await ready(visitor);
   assert.equal(
     await visitor
@@ -503,7 +503,7 @@ try {
     "private memorial remains enterable by its keeper and absent from anonymous village and direct access",
   );
   await owner.setViewportSize({ width: 390, height: 844 });
-  await owner.goto(origin);
+  await owner.goto(origin + "/#/village");
   await ready(owner);
   await shot(owner, "mobile-village");
   const before = await owner.locator("#world").getAttribute("data-position");
