@@ -279,7 +279,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
       case "close-create": closeCreate(); break;
       case "prev": draft.error = ""; draft.step--; renderCreate(); break;
       case "next": next(); break;
-      case "plaza": deps.go("/"); if (!mode.legacy) park.walkTo(0, -3); setView("overview"); break;
+      case "plaza": deps.go("/"); setView("overview"); if (!mode.legacy) park.walkTo(0, -3); break;
       case "back": deps.go("/"); break;
       case "about": $("#about").hidden = false; break;
       case "close-about": $("#about").hidden = true; break;
