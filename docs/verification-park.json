@@ -1,8 +1,12 @@
 {
   "origin": "http://127.0.0.1:4881",
   "checks": [
+    "start: 25 tiles around 0,0, 4 tile kinds parsed, 6 lamp lights",
+    "keyboard walk moved to tile 0,1",
+    "walked 10 tiles to 6,4: rings loaded, far tiles + origin memorials unloaded, demo-hazel on plot 6:4:5",
+    "plaza button returns to 0,0 and origin memorials reload",
     "1280px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back",
     "390px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back"
   ],
-  "at": "2026-10-31T01:31:29.424Z"
+  "at": "2026-10-31T05:47:39.892Z"
 }

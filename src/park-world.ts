@@ -20,6 +20,8 @@ export type ParkHandle = {
   walkTo(x: number, z: number, instant?: boolean): void;
   /** Loaded tile keys "i,j" and rendered memorial ids, for checks and the HUD. */
   stats(): { tiles: string[]; memorials: string[]; parsed: number; lights: number };
+  /** World [x, z] and plot key of a rendered memorial, or null when its tile isn't loaded. */
+  where(id: string): { x: number; z: number; plot: string } | null;
   /** Debug/screenshot camera: absolute position + target, fog on/off. */
   shot(pos: [number, number, number], target: [number, number, number], fog?: boolean): void;
   destroy(): void;
@@ -391,7 +393,9 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
   }
   let lastAround = home.clone();
   function applyCamera(animate = true) {
-    const around = focusId ? lastAround : new THREE.Vector3(controls.target.x, 0, controls.target.z);
+    // Mid-glide (walkTo / plaza), re-pose around where the player is heading, not where they are.
+    const tgt = goal.active ? goal.target : controls.target;
+    const around = focusId ? lastAround : new THREE.Vector3(tgt.x, 0, tgt.z);
     let pose = overviewPose(legacy ? home : around);
     const m = focusId ? items.find((x) => x.id === focusId) : undefined;
     const mp = m && memorialPose(m);
@@ -504,6 +508,10 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       if (instant) { camera.position.copy(goal.pos); controls.target.copy(goal.target); goal.active = false; stream(); }
     },
     stats: () => ({ tiles: [...tiles.keys()], memorials: [...byId.keys()], parsed: kindPoses.size, lights: lampPool.filter((l) => l.intensity > 0).length }),
+    where(id) {
+      const g = byId.get(id);
+      return g ? { x: g.position.x, z: g.position.z, plot: g.userData.plotKey } : null;
+    },
     shot(pos, target, fogOn = true) {
       goal.active = false; focusId = null;
       camera.position.set(...pos); controls.target.set(...target);
