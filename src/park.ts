@@ -119,13 +119,16 @@ const DEMOS: [string, Memorial["species"], string, string, Stone, string, string
   ["Mango", "cat", "2012", "2026", "leaf", "#e08a3a", "Ruled the windowsill."],
   ["Toby", "guinea", "2020", "2024", "classic", "#a56b45", "Wheeked for every carrot."],
   ["Hazel", "dog", "2013", "2026", "heart", "#b8875a", "Best friend on the beach."],
+  ["Willow", "horse", "1999", "2025", "arch", "#8a5a3c", "Knew every gate on the farm."],
+  ["Shelly", "turtle", "1988", "2026", "leaf", "#6f8f4a", "Slow and steady, always."],
 ];
-const DEMO_PLOTS = [1, 4, 8, 13, 19, 22, 28, 33];
+const DEMO_PLOTS = [1, 4, 8, 13, 19, 22, 28, 33, 10, 25];
 // Spread over the infinite park: the plaza tile, its neighbours, and one far tile (6, 4)
 // so a walk shows tiles streaming in with memorials on them. k < 12 fits every tile kind.
 const DEMO_PARK: GlobalPlot[] = [
   { i: 0, j: 0, k: 0 }, { i: 0, j: 0, k: 7 }, { i: 1, j: 0, k: 2 }, { i: -1, j: 0, k: 9 },
   { i: 0, j: 1, k: 4 }, { i: 1, j: -1, k: 6 }, { i: -2, j: 2, k: 3 }, { i: 6, j: 4, k: 5 },
+  { i: 1, j: 1, k: 3 }, { i: -1, j: -1, k: 5 },
 ];
 export async function seedDemo() {
   if (one<{ n: number }>("SELECT COUNT(*) n FROM memorials")!.n > 0) return;

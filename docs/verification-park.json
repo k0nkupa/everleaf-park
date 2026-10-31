@@ -2,6 +2,7 @@
   "origin": "http://127.0.0.1:4881",
   "checks": [
     "test hook only exposed with ?test in preview mode",
+    "eyes: rabbit 2, turtle 2, bird 2, dog 2, cat 2, horse 2, guinea 2",
     "collision: Lantern Tree stops the walk at z=-1.40, diagonal slides to x=-6.10, stones block; dog metalness 0, roughness 0.82, luminance 0.46",
     "start: 25 tiles around 0,0, 4 tile kinds parsed, 6 lamp lights",
     "keyboard walk moved to tile 0,1",
@@ -10,5 +11,5 @@
     "1280px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back",
     "390px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back"
   ],
-  "at": "2026-10-31T07:42:42.217Z"
+  "at": "2026-10-31T07:57:08.130Z"
 }

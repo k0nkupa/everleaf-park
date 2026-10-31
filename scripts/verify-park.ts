@@ -52,6 +52,13 @@ async function infiniteWalk(p: Page) {
   // Dog material: soft, non-metallic, lifted from the near-black first pass.
   const dog = await p.evaluate(() => (document.getElementById("park-stage") as any).park.petLook("demo-biscuit"));
   assert.ok(dog && dog.metalness <= 0.05 && dog.roughness >= 0.6 && dog.luminance > 0.15, `dog reads warm + soft ${JSON.stringify(dog)}`);
+  // Every species renders with two eyes (the first-pass sculptures have none; pet-face.ts adds them).
+  const looks = await p.evaluate(() => { const k = (document.getElementById("park-stage") as any).park; return k.stats().memorials.map((id: string) => k.petLook(id)); });
+  const bySpecies = new Map<string, number>();
+  for (const l of looks) if (l) bySpecies.set(l.species, Math.min(bySpecies.get(l.species) ?? 99, l.eyes));
+  for (const sp of ["dog", "cat", "rabbit", "bird", "guinea", "horse", "turtle"])
+    assert.ok((bySpecies.get(sp) ?? 0) >= 2, `${sp} has eyes rendered (${bySpecies.get(sp) ?? "not shown"})`);
+  out.push(`eyes: ${[...bySpecies].map(([k, v]) => `${k} ${v}`).join(", ")}`);
   // Collision: walk north from the plaza into the Lantern Tree; we stop outside it and never overlap a collider.
   const H = "(document.getElementById('park-stage')).park";
   const step = (dx: number, dz: number) => p.evaluate(([a, b, h]) => (eval(h as string) as any).step(a, b), [dx, dz, H] as const);

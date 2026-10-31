@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { getAsset, findAnchor, plotEmpties, defaultPlotPosition, type StoneStyle, type PlotPose } from "./park-assets.ts";
+import { softenPet, addPetFace } from "./pet-face.ts";
 import { TILE_KINDS, TILE_SIZE, tileKind, tileAt, tileOrigin, plotKey, type GlobalPlot, type TileKind } from "./park-grid.ts";
 
 export type ParkMemorial = {
@@ -26,7 +27,9 @@ export type ParkHandle = {
   step(dx: number, dz: number): { x: number; z: number };
   colliders(x: number, z: number): { x: number; z: number; r: number }[];
   /** Pet material check: metalness, roughness and linear luminance of its base colour. */
-  petLook(id: string): { metalness: number; roughness: number; luminance: number } | null;
+  /** World position of a memorial's pet (test/screenshot use). */
+  petPosition(id: string): [number, number, number] | null;
+  petLook(id: string): { metalness: number; roughness: number; luminance: number; eyes: number; species: string } | null;
   /** Debug/screenshot camera: absolute position + target, fog on/off. */
   shot(pos: [number, number, number], target: [number, number, number], fog?: boolean): void;
   destroy(): void;
@@ -121,22 +124,6 @@ function markerTexture() {
   g.beginPath(); g.moveTo(64, 26); g.lineTo(64, 108); g.stroke();
   markerTex = new THREE.CanvasTexture(c); markerTex.colorSpace = THREE.SRGBColorSpace;
   return markerTex;
-}
-/** Warm, soft pet look: the first-pass pet GLBs default to metallic (dog: dark + glossy under lamps). */
-function softenPet(pet: THREE.Object3D) {
-  pet.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const src = mesh.material as THREE.MeshPhysicalMaterial;
-    const mat = new THREE.MeshStandardMaterial({ color: src.color?.clone() ?? new THREE.Color(0xb08a64), roughness: 0.82, metalness: 0, map: src.map ?? null });
-    const hsl = { h: 0, s: 0, l: 0 };
-    mat.color.getHSL(hsl);
-    if (hsl.l < 0.42) mat.color.setHSL(hsl.h, Math.min(hsl.s, 0.55), 0.42 + hsl.l * 0.25); // lift very dark coats
-    mat.userData.pet = true;
-    mesh.material = mat;
-    mesh.userData.owned = true; mesh.userData.ownGeometry = false;
-    if (!mesh.geometry.attributes.normal) mesh.geometry.computeVertexNormals();
-  });
 }
 const tileKey = (i: number, j: number) => `${i},${j}`;
 
@@ -286,10 +273,11 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       facePlane(w * 0.34, w * 0.34, tex, photoA).name = "photo";
     }
     softenPet(pet);
-    fitHeight(pet, 0.45);
-    pet.rotation.y = Math.PI + 0.45; // face the visitor (-Z), turned slightly
+    const faced = addPetFace(pet, m.species); // faces +Z, with eyes + nose
+    fitHeight(faced, 0.45);
+    faced.rotation.y = Math.PI + 0.45; // face the visitor (-Z), turned slightly
     const petHolder = new THREE.Group();
-    petHolder.add(pet);
+    petHolder.add(faced);
     at(stone, "pet_anchor").add(petHolder);
     at(stone, "flower_anchor").add(flowers);
     const candleA = at(stone, "candle_anchor");
@@ -315,6 +303,7 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     g.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.memorialId = m.id; } });
     g.userData.memorialId = m.id;
     g.userData.plotKey = m.plot_key;
+    g.userData.species = m.species;
     stone.scale.multiplyScalar(STONE_SCALE);
     // Readable from above: a soft warm ring on the plot, plus a leaf marker that fades in at distance.
     const ring = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: ringTexture(), transparent: true, depthWrite: false, opacity: 0.75 }));
@@ -643,13 +632,20 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       return { x: controls.target.x, z: controls.target.z };
     },
     colliders: (x, z) => collidersNear(x, z),
+    petPosition(id) {
+      let pos: [number, number, number] | null = null;
+      byId.get(id)?.traverse((o) => { if (!pos && o.name === "pet-faced") { const b = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()); pos = [b.x, b.y, b.z]; } });
+      return pos;
+    },
     petLook(id) {
       const g = byId.get(id);
       if (!g) return null;
-      let out: { metalness: number; roughness: number; luminance: number } | null = null;
+      let out: { metalness: number; roughness: number; luminance: number; eyes: number; species: string } | null = null;
+      let eyes = 0;
+      g.traverse((o) => { if (o.name === "pet-eye" && (o as THREE.Mesh).isMesh && o.visible) eyes++; });
       g.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-        if (!out && m?.userData?.pet) { const c = m.color; out = { metalness: m.metalness, roughness: m.roughness, luminance: 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b }; }
+        if (!out && m?.userData?.pet) { const c = m.color; out = { metalness: m.metalness, roughness: m.roughness, luminance: 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b, eyes, species: String(g.userData.species) }; }
       });
       return out;
     },
