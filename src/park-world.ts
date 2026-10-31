@@ -22,6 +22,11 @@ export type ParkHandle = {
   stats(): { tiles: string[]; memorials: string[]; parsed: number; lights: number };
   /** World [x, z] and plot key of a rendered memorial, or null when its tile isn't loaded. */
   where(id: string): { x: number; z: number; plot: string } | null;
+  /** Walk by (dx, dz) metres through the same collision as the keyboard. */
+  step(dx: number, dz: number): { x: number; z: number };
+  colliders(x: number, z: number): { x: number; z: number; r: number }[];
+  /** Pet material check: metalness, roughness and linear luminance of its base colour. */
+  petLook(id: string): { metalness: number; roughness: number; luminance: number } | null;
   /** Debug/screenshot camera: absolute position + target, fog on/off. */
   shot(pos: [number, number, number], target: [number, number, number], fog?: boolean): void;
   destroy(): void;
@@ -83,6 +88,56 @@ export type ParkOpts = {
 // Streaming radius (in tiles, Chebyshev): load <= LOAD_R, drop > DROP_R. The gap is hysteresis
 // so walking back and forth over a seam doesn't thrash.
 const LOAD_R = 2, DROP_R = 3, LAMP_LIGHTS = 6;
+// Stones read better from above at a modest 1.25x; a soft ground ring + far marker do the rest.
+const STONE_SCALE = 1.25, PLAYER_R = 0.35, STONE_R = 0.85, CELL = 0.5;
+type Collider = { x: number; z: number; r: number };
+
+function radialTexture(inner: string, outer: string) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d")!, grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, inner); grad.addColorStop(0.45, inner.replace(/[\d.]+\)$/, "0.45)")); grad.addColorStop(1, outer);
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+let glowTex: THREE.Texture | null = null, ringTex: THREE.Texture | null = null, markerTex: THREE.Texture | null = null;
+const candleGlowMat = () => new THREE.SpriteMaterial({ map: (glowTex ??= radialTexture("rgba(255,196,110,1)", "rgba(255,160,60,0)")), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+function ringTexture() {
+  if (ringTex) return ringTex;
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d")!, grad = g.createRadialGradient(64, 64, 30, 64, 64, 64);
+  grad.addColorStop(0, "rgba(255,226,150,0)"); grad.addColorStop(0.55, "rgba(255,226,150,0.85)"); grad.addColorStop(1, "rgba(255,226,150,0)");
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  ringTex = new THREE.CanvasTexture(c); ringTex.colorSpace = THREE.SRGBColorSpace;
+  return ringTex;
+}
+function markerTexture() {
+  if (markerTex) return markerTex;
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "rgba(255,240,205,0.95)"; g.strokeStyle = "rgba(122,78,40,0.9)"; g.lineWidth = 8;
+  g.beginPath(); g.moveTo(64, 10); g.bezierCurveTo(112, 40, 110, 92, 64, 120); g.bezierCurveTo(18, 92, 16, 40, 64, 10); g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(64, 26); g.lineTo(64, 108); g.stroke();
+  markerTex = new THREE.CanvasTexture(c); markerTex.colorSpace = THREE.SRGBColorSpace;
+  return markerTex;
+}
+/** Warm, soft pet look: the first-pass pet GLBs default to metallic (dog: dark + glossy under lamps). */
+function softenPet(pet: THREE.Object3D) {
+  pet.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const src = mesh.material as THREE.MeshPhysicalMaterial;
+    const mat = new THREE.MeshStandardMaterial({ color: src.color?.clone() ?? new THREE.Color(0xb08a64), roughness: 0.82, metalness: 0, map: src.map ?? null });
+    const hsl = { h: 0, s: 0, l: 0 };
+    mat.color.getHSL(hsl);
+    if (hsl.l < 0.42) mat.color.setHSL(hsl.h, Math.min(hsl.s, 0.55), 0.42 + hsl.l * 0.25); // lift very dark coats
+    mat.userData.pet = true;
+    mesh.material = mat;
+    mesh.userData.owned = true; mesh.userData.ownGeometry = false;
+    if (!mesh.geometry.attributes.normal) mesh.geometry.computeVertexNormals();
+  });
+}
 const tileKey = (i: number, j: number) => `${i},${j}`;
 
 type Tile = { i: number; j: number; kind: TileKind; root: THREE.Object3D; memorials: THREE.Group[] };
@@ -131,7 +186,7 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
 
   // ---------- plot poses ----------
   let empties = new Map<number, PlotPose>(); // legacy park
-  const kindPoses = new Map<TileKind, { plots: Map<number, PlotPose>; lamps: THREE.Vector3[] }>();
+  const kindPoses = new Map<TileKind, { plots: Map<number, PlotPose>; lamps: THREE.Vector3[]; colliders: Collider[] }>();
   const fallbackTilePose = (k: number): PlotPose => {
     const col = k % 4, row = Math.floor(k / 4);
     return { pos: new THREE.Vector3([-6.1, -3.3, 3.3, 6.1][col], 0, [-6.2, -3.2, 3.2, 6.2][row % 4]), quat: new THREE.Quaternion() };
@@ -170,7 +225,20 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
         const lamps: THREE.Vector3[] = [];
         t.updateWorldMatrix(true, true);
         t.traverse((o) => { if (/^lamp_\d+$/.test(o.name)) lamps.push(o.getWorldPosition(new THREE.Vector3())); });
-        kindPoses.set(kind, { plots, lamps });
+        // Colliders: anything 0.6-1.7 m tall in the tile (tree trunks, lamp posts, bench backs,
+        // planters, the Lantern Tree) marks a 0.5 m cell; each cell is a small circle collider.
+        const cells = new Set<string>(), v = new THREE.Vector3();
+        t.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const pos = mesh.geometry.attributes.position;
+          for (let n = 0; n < pos.count; n++) {
+            v.fromBufferAttribute(pos, n).applyMatrix4(mesh.matrixWorld);
+            if (v.y > 0.6 && v.y < 1.7 && Math.abs(v.x) < 8 && Math.abs(v.z) < 8) cells.add(`${Math.floor(v.x / CELL)},${Math.floor(v.z / CELL)}`);
+          }
+        });
+        const colliders = [...cells].map((c) => { const [a, b] = c.split(",").map(Number); return { x: (a + 0.5) * CELL, z: (b + 0.5) * CELL, r: CELL * 0.6 }; });
+        kindPoses.set(kind, { plots, lamps, colliders });
         host.dataset.parkAsset = t.userData.placeholder ? "placeholder" : "glb";
       })).then(() => undefined);
 
@@ -217,6 +285,7 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       tex.colorSpace = THREE.SRGBColorSpace;
       facePlane(w * 0.34, w * 0.34, tex, photoA).name = "photo";
     }
+    softenPet(pet);
     fitHeight(pet, 0.45);
     pet.rotation.y = Math.PI + 0.45; // face the visitor (-Z), turned slightly
     const petHolder = new THREE.Group();
@@ -228,7 +297,12 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       const c = await getAsset("candle");
       c.position.x = i * 0.14;
       c.name = "candle";
-      if (i === 0) { const la = at(c, "light_anchor"); la.userData.candleLight = true; }
+      const la = at(c, "light_anchor");
+      if (i === 0) la.userData.candleLight = true;
+      // Cheap per-candle glow: an additive sprite, no real light.
+      const glow = new THREE.Sprite(candleGlowMat());
+      glow.name = "candle-glow"; glow.scale.setScalar(0.38); glow.userData.owned = true; glow.userData.ownGeometry = false;
+      la.add(glow);
       candleA.add(c);
     }
     const toyA = at(stone, "toy_anchor");
@@ -241,6 +315,13 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     g.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.memorialId = m.id; } });
     g.userData.memorialId = m.id;
     g.userData.plotKey = m.plot_key;
+    stone.scale.multiplyScalar(STONE_SCALE);
+    // Readable from above: a soft warm ring on the plot, plus a leaf marker that fades in at distance.
+    const ring = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: ringTexture(), transparent: true, depthWrite: false, opacity: 0.75 }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.name = "plot-ring"; ring.userData.owned = true;
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(), depthWrite: false, transparent: true, opacity: 0 }));
+    marker.name = "far-marker"; marker.position.y = 2.6; marker.scale.setScalar(1.4); marker.userData.owned = true; marker.userData.ownGeometry = false;
+    g.add(ring, marker);
     return g;
   }
   // Only per-memorial planes own their geometry/material/texture; clones share the cached GLTF data.
@@ -249,7 +330,9 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     g.traverse((o) => {
       if (!o.userData.owned) return;
       const mesh = o as THREE.Mesh, mat = mesh.material as THREE.MeshStandardMaterial;
-      mat.map?.dispose(); mat.dispose(); mesh.geometry.dispose();
+      if (mat.map && mat.map !== glowTex && mat.map !== ringTex && mat.map !== markerTex && !mat.userData.pet) mat.map.dispose();
+      mat.dispose();
+      if (o.userData.ownGeometry !== false) mesh.geometry.dispose();
     });
     const p = pickables.indexOf(g);
     if (p >= 0) pickables.splice(p, 1);
@@ -418,6 +501,43 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
   const onBlur = () => keys.clear();
   addEventListener("keydown", onDown); addEventListener("keyup", onUp); addEventListener("blur", onBlur);
   const fwd = new THREE.Vector3(), side = new THREE.Vector3(), step = new THREE.Vector3();
+  /** Nearby circle colliders: tile geometry cells + stones of rendered memorials. */
+  function collidersNear(x: number, z: number, reach = 2.5) {
+    const out: Collider[] = [];
+    const c = tileAt(x, z);
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+      const t = tiles.get(tileKey(c.i + di, c.j + dj));
+      if (!t) continue;
+      const o = tileOrigin(t.i, t.j);
+      for (const k of kindPoses.get(t.kind)?.colliders ?? []) {
+        const wx = k.x + o.x, wz = k.z + o.z;
+        if (Math.abs(wx - x) < reach && Math.abs(wz - z) < reach) out.push({ x: wx, z: wz, r: k.r });
+      }
+    }
+    for (const g of pickables) if (Math.abs(g.position.x - x) < reach && Math.abs(g.position.z - z) < reach) out.push({ x: g.position.x, z: g.position.z, r: STONE_R });
+    return out;
+  }
+  /** Move the player by step, pushing out of circles so blocked motion slides along them. */
+  function moveWithCollision(step: THREE.Vector3) {
+    const p = controls.target;
+    const sub = Math.max(1, Math.ceil(step.length() / 0.2));
+    for (let n = 0; n < sub; n++) {
+      const nx = p.x + step.x / sub, nz = p.z + step.z / sub;
+      const near = collidersNear(nx, nz);
+      let x = nx, z = nz;
+      for (let it = 0; it < 3; it++) for (const c of near) {
+        const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz), min = c.r + PLAYER_R;
+        if (d < min) {
+          // Only resolve if this step pushed us deeper (lets a player who starts inside walk out).
+          const before = Math.hypot(p.x - c.x, p.z - c.z);
+          if (d >= before) continue;
+          const k = d > 1e-4 ? (min - d) / d : 0;
+          x += dx * k; z += dz * k;
+        }
+      }
+      p.x = x; p.z = z;
+    }
+  }
   function walk(dt: number) {
     if (!keys.size) return;
     const f = (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) - (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
@@ -427,7 +547,9 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     side.crossVectors(fwd, camera.up).normalize();
     step.copy(fwd).multiplyScalar(f).addScaledVector(side, s).normalize()
       .multiplyScalar((keys.has("ShiftLeft") || keys.has("ShiftRight") ? 18 : 8) * dt);
-    camera.position.add(step); controls.target.add(step);
+    const before = controls.target.clone();
+    moveWithCollision(step);
+    camera.position.add(controls.target.clone().sub(before));
     goal.active = false;
   }
 
@@ -482,7 +604,12 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     // Keep neighbouring stones from blocking the close-up.
     const focused = focusId ? byId.get(focusId) : undefined;
     for (const g of pickables) g.visible = !focused || g === focused || g.position.distanceTo(camera.position) > 2.4;
-    memorialRoot.traverse((o) => { if (o.name === "flame") o.scale.y = 1.6 + Math.sin(t * 9 + o.id) * 0.25; });
+    const camH = camera.position.y;
+    memorialRoot.traverse((o) => {
+      if (o.name === "flame") o.scale.y = 1.6 + Math.sin(t * 9 + o.id) * 0.25;
+      else if (o.name === "candle-glow") o.scale.setScalar(0.36 + Math.sin(t * 7 + o.id) * 0.04);
+      else if (o.name === "far-marker") ((o as THREE.Sprite).material.opacity = THREE.MathUtils.clamp((camH - 18) / 14, 0, 1));
+    });
     controls.update();
     renderer.render(scene, camera);
     host.dataset.camera = camera.position.toArray().map((v) => v.toFixed(1)).join(",");
@@ -508,6 +635,24 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       if (instant) { camera.position.copy(goal.pos); controls.target.copy(goal.target); goal.active = false; stream(); }
     },
     stats: () => ({ tiles: [...tiles.keys()], memorials: [...byId.keys()], parsed: kindPoses.size, lights: lampPool.filter((l) => l.intensity > 0).length }),
+    step(dx, dz) {
+      const before = controls.target.clone();
+      moveWithCollision(new THREE.Vector3(dx, 0, dz));
+      camera.position.add(controls.target.clone().sub(before));
+      stream();
+      return { x: controls.target.x, z: controls.target.z };
+    },
+    colliders: (x, z) => collidersNear(x, z),
+    petLook(id) {
+      const g = byId.get(id);
+      if (!g) return null;
+      let out: { metalness: number; roughness: number; luminance: number } | null = null;
+      g.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+        if (!out && m?.userData?.pet) { const c = m.color; out = { metalness: m.metalness, roughness: m.roughness, luminance: 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b }; }
+      });
+      return out;
+    },
     where(id) {
       const g = byId.get(id);
       return g ? { x: g.position.x, z: g.position.z, plot: g.userData.plotKey } : null;
@@ -528,7 +673,6 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       renderer.dispose(); canvas.remove();
     },
   };
-  (host as HTMLElement & { park?: ParkHandle }).park = handle;
   return handle;
 }
 // keep TILE_SIZE / plotKey exported for callers that only import the world module

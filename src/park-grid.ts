@@ -46,14 +46,17 @@ export function* spiralTiles(ci = 0, cj = 0, maxRing = MAX_TILE) {
   }
 }
 /** Next free plots, spiralling out from a tile. */
-export function freePlots(taken: Set<string>, count: number, ci = 0, cj = 0) {
+/** maxScan caps how many plots are examined (free or taken); Infinity for placement. */
+export function freePlots(taken: Set<string>, count: number, ci = 0, cj = 0, maxScan = Infinity) {
   const out: GlobalPlot[] = [];
+  let scanned = 0;
   for (const t of spiralTiles(ci, cj)) {
-    for (let k = 0; k < tilePlots(t.i, t.j) && out.length < count; k++) {
+    for (let k = 0; k < tilePlots(t.i, t.j) && out.length < count && scanned < maxScan; k++, scanned++) {
       const p = { i: t.i, j: t.j, k };
       if (!taken.has(plotKey(p))) out.push(p);
     }
-    if (out.length >= count) break;
+    if (out.length >= count || scanned >= maxScan) break;
   }
   return out;
 }
+export const FREE_SCAN_CAP = 500;

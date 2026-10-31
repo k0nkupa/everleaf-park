@@ -49,6 +49,31 @@ async function infiniteWalk(p: Page) {
   const far = park.items.find((m) => Math.max(Math.abs(m.plot.i), Math.abs(m.plot.j)) > DROP_R);
   assert.ok(far, "a memorial sits on a far tile");
   assert.ok(!s.memorials.includes(far.id), "far memorial is not rendered while its tile is unloaded");
+  // Dog material: soft, non-metallic, lifted from the near-black first pass.
+  const dog = await p.evaluate(() => (document.getElementById("park-stage") as any).park.petLook("demo-biscuit"));
+  assert.ok(dog && dog.metalness <= 0.05 && dog.roughness >= 0.6 && dog.luminance > 0.15, `dog reads warm + soft ${JSON.stringify(dog)}`);
+  // Collision: walk north from the plaza into the Lantern Tree; we stop outside it and never overlap a collider.
+  const H = "(document.getElementById('park-stage')).park";
+  const step = (dx: number, dz: number) => p.evaluate(([a, b, h]) => (eval(h as string) as any).step(a, b), [dx, dz, H] as const);
+  const clear = async () => {
+    const r = await p.evaluate((h) => { const k = eval(h); const t = k.step(0, 0); return { t, cs: k.colliders(t.x, t.z) }; }, H);
+    return Math.min(...r.cs.map((c: any) => Math.hypot(c.x - r.t.x, c.z - r.t.z) - c.r - 0.35));
+  };
+  let pos = await step(0, 0);
+  for (let n = 0; n < 30; n++) pos = await step(0, 0.2);
+  assert.ok(pos.z < -0.6, `Lantern Tree blocks the walk (z=${pos.z.toFixed(2)})`);
+  assert.ok((await clear()) > -0.02, "player never overlaps a collider");
+  const blockedZ = pos.z;
+  for (let n = 0; n < 15; n++) pos = await step(0.2, 0.2);
+  assert.ok(Math.abs(pos.x) > 0.5, `diagonal push slides along the obstacle (x=${pos.x.toFixed(2)}, z=${pos.z.toFixed(2)} from ${blockedZ.toFixed(2)})`);
+  assert.ok((await clear()) > -0.02, "still clear after sliding");
+  const st = await p.evaluate(() => (document.getElementById("park-stage") as any).park.where("demo-biscuit"));
+  await p.evaluate(([x, z]) => (document.getElementById("park-stage") as any).park.walkTo(x, z, true), [st.x, st.z - 2.5]);
+  for (let n = 0; n < 20; n++) pos = await step(0, 0.2);
+  assert.ok(Math.hypot(pos.x - st.x, pos.z - st.z) >= 0.85 + 0.35 - 0.02, "stones block the player");
+  out.push(`collision: Lantern Tree stops the walk at z=${blockedZ.toFixed(2)}, diagonal slides to x=${pos.x.toFixed(2)}, stones block; dog metalness ${dog.metalness}, roughness ${dog.roughness}, luminance ${dog.luminance.toFixed(2)}`);
+  await p.evaluate(() => (document.getElementById("park-stage") as any).park.walkTo(0, -3, true));
+  await settle(p, 0, 0);
   out.push(`start: ${s.tiles.length} tiles around 0,0, 4 tile kinds parsed, ${s.lights} lamp lights`);
   // Keyboard walk: hold W, the player leaves the start tile.
   await p.locator(".park-canvas").focus();
@@ -89,10 +114,18 @@ async function infiniteWalk(p: Page) {
   return out;
 }
 try {
+  {
+    const p = await browser.newPage();
+    await p.goto(origin + "/#/");
+    await p.waitForSelector("#park-stage");
+    assert.equal(await p.evaluate(() => typeof (document.getElementById("park-stage") as any).park), "undefined", "test hook hidden without ?test");
+    checks.push("test hook only exposed with ?test in preview mode");
+    await p.close();
+  }
   for (const [w, h] of [[1280, 800], [390, 844]]) {
     const p = await browser.newPage({ viewport: { width: w, height: h } });
     p.on("pageerror", (e) => errors.push(e.message));
-    await p.goto(origin + "/#/");
+    await p.goto(origin + "/?test=1#/");
     await p.waitForSelector('#park-stage[data-ready="1"]', { timeout: 120000 });
     if (w === 1280) checks.push(...(await infiniteWalk(p)));
     const before = Number(await p.getAttribute("#park-stage", "data-memorials"));

@@ -96,6 +96,8 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
       if (el) el.textContent = k + (tileKind(i, j) === "landmark" ? " · 🏮" : "");
     },
   });
+  // Test/dev hook for verify scripts and screenshots: only in preview mode with ?test in the URL.
+  if (deps.isPreview() && new URLSearchParams(location.search).has("test")) (stage as HTMLElement & { park?: ParkHandle }).park = park;
 
   // Clock: real local time, a gentle day-part label.
   const tickClock = () => {
@@ -156,7 +158,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
   let draft: Draft;
   const resetDraft = () => (draft = { step: 1, file: null, photo: "", name: "", species: "dog", born: yearNow - 10, passed: yearNow, message: "", stone: "classic", plot: null, busy: false, error: "" });
   resetDraft();
-  function openCreate() { resetDraft(); $("#create").hidden = false; renderCreate(); }
+  function openCreate() { resetDraft(); tilePage = 0; $("#create").hidden = false; renderCreate(); }
   function closeCreate() { $("#create").hidden = true; if (draft.photo) URL.revokeObjectURL(draft.photo); }
   // Each tile kind has Garmin's plots.json (tile-local Blender x/y metres). The picker shows the
   // tile nearest the player that still has room, pre-picking the first free plot.
@@ -166,15 +168,19 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
       if (d?.plots?.length) layouts.set(kind, d.plots.map((r) => ({ k: Number(r.name.replace(/\D/g, "")), x: r.x, y: r.y })));
     }).catch(() => {});
   const gridLayout = (n: number) => Array.from({ length: n }, (_, k) => ({ k, x: [-6.1, -3.3, 3.3, 6.1][k % 4], y: [6.2, 3.2, -3.2, -6.2][Math.floor(k / 4) % 4] }));
+  let tilePage = 0;
   function plotMap() {
-    const first = data.free[0];
+    // Free plots come back spiralling out from the player (up to ~500 plots searched); page by tile.
+    const tilesWithRoom = [...new Map(data.free.map((p) => [`${p.i},${p.j}`, p])).values()];
+    if (tilePage >= tilesWithRoom.length) tilePage = 0;
+    const first = tilesWithRoom[tilePage];
     if (!first) return `<p class="note">The park is full right now.</p>`;
     const kind = tileKind(first.i, first.j);
     const layout = layouts.get(kind) || gridLayout(kind === "landmark" ? 12 : 16);
     const free = new Set(data.free.map((p) => p.key));
     const byPlot = new Map(data.items.filter((m) => m.plot.i === first.i && m.plot.j === first.j).map((m) => [m.plot.k, m]));
     const pct = (v: number) => (50 + (v / 9) * 50).toFixed(2) + "%";
-    return `<p class="note">Tile ${first.i}, ${first.j}${kind === "landmark" ? " · by the Lantern Tree" : ""}</p><div class="plot-map" role="group" aria-label="Choose a plot"><div class="pm-plaza">${kind === "landmark" ? "🏮" : "✚"}</div>${layout.map(({ k, x, y }) => {
+    return `<p class="note">Tile ${first.i}, ${first.j}${kind === "landmark" ? " · by the Lantern Tree" : ""}${tilesWithRoom.length > 1 ? ` · <button type="button" class="link-btn" data-act="next-tile">Another tile → (${tilePage + 1}/${tilesWithRoom.length})</button>` : ""}</p><div class="plot-map" role="group" aria-label="Choose a plot"><div class="pm-plaza">${kind === "landmark" ? "🏮" : "✚"}</div>${layout.map(({ k, x, y }) => {
       const key = `${first.i}:${first.j}:${k}`, m = byPlot.get(k), isFree = free.has(key);
       return `<button type="button" style="left:${pct(x)};top:${pct(-y)}" class="pm-plot${isFree ? " free" : " taken"}${draft.plot === key ? " picked" : ""}" ${isFree ? `data-plot="${key}" aria-label="Plot ${k + 1}, free"` : `disabled aria-label="Plot ${k + 1}${m ? ", " + esc(m.name) : ", taken"}"`}>${isFree ? k + 1 : m ? esc(m.name.slice(0, 1)) : "·"}</button>`;
     }).join("")}</div>`;
@@ -279,6 +285,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
       case "close-create": closeCreate(); break;
       case "prev": draft.error = ""; draft.step--; renderCreate(); break;
       case "next": next(); break;
+      case "next-tile": tilePage++; renderCreate(); break;
       case "plaza": deps.go("/"); setView("overview"); if (!mode.legacy) park.walkTo(0, -3); break;
       case "back": deps.go("/"); break;
       case "about": $("#about").hidden = false; break;

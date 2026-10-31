@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
 import { db, dataDir, one, many, run, transaction, assignParkPlots } from "./db.ts";
-import { freePlots, parsePlotKey, plotKey, tileKind, type GlobalPlot } from "./park-grid.ts";
+import { FREE_SCAN_CAP, freePlots, parsePlotKey, plotKey, tileKind, type GlobalPlot } from "./park-grid.ts";
 import { HttpError, requireValue, requireUser, getMemorial } from "./domain.ts";
 import type { User, Memorial } from "./types.ts";
 
@@ -64,7 +64,7 @@ export async function parkRoute(
       body: {
         stones: STONES,
         near,
-        free: freePlots(taken(), 16, near.i, near.j).map((p) => ({ ...p, key: plotKey(p), tile: tileKind(p.i, p.j) })),
+        free: freePlots(taken(), 96, near.i, near.j, FREE_SCAN_CAP).map((p) => ({ ...p, key: plotKey(p), tile: tileKind(p.i, p.j) })),
         items: publicRows().map(summary),
       },
     };
