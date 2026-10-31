@@ -1,5 +1,6 @@
 import { chromium, type Page } from "playwright-core";
-import { spawn } from "node:child_process";
+import { verificationRuntime } from "./sites-verification.ts";
+import { signInFixture } from "./sites-browser.ts";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -19,8 +20,7 @@ const port = await new Promise<number>((done) => {
 const origin = `http://127.0.0.1:${port}`,
   errors: string[] = [],
   checks: string[] = [];
-let child: ReturnType<typeof spawn> | null = null,
-  logs = "";
+const runtime = await verificationRuntime(scratch, port);
 const browser = await chromium.launch({
   executablePath:
     process.env.CHROME_PATH ||
@@ -28,44 +28,7 @@ const browser = await chromium.launch({
   headless: true,
 });
 async function ready() {
-  await new Promise<void>((done, reject) => {
-    child = spawn(
-      process.execPath,
-      ["--experimental-strip-types", "src/server.ts"],
-      {
-        env: {
-          ...process.env,
-          PORT: String(port),
-          HOST: "127.0.0.1",
-          APP_ORIGIN: origin,
-          DATA_DIR: scratch,
-          NODE_ENV: "development",
-          RESEND_API_KEY: "",
-          EMAIL_FROM: "",
-          MODERATOR_EMAILS: "moderator@example.test",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    const timer = setTimeout(
-      () => reject(Error(logs || "Startup timed out")),
-      15000,
-    );
-    child.stdout!.on("data", (c) => {
-      logs += c;
-      if (logs.includes("Everleaf:")) {
-        clearTimeout(timer);
-        done();
-      }
-    });
-    child.stderr!.on("data", (c) => (logs += c));
-    child.once("exit", (code) => {
-      if (code) {
-        clearTimeout(timer);
-        reject(Error(logs));
-      }
-    });
-  });
+  await runtime.start();
 }
 async function context() {
   const ctx = await browser.newContext({
@@ -84,20 +47,14 @@ async function login(
   name: string,
   path = "/#/home",
 ) {
-  await page.goto(origin + "/#/login?next=" + encodeURIComponent(path));
-  await page.locator("#login-form").waitFor();
-  await page.getByLabel("Your name", { exact: true }).fill(name);
-  await page.getByLabel("Email", { exact: true }).fill(address);
-  await page
-    .getByRole("button", { name: "Send sign-in link", exact: true })
-    .click();
-  await page.getByRole("link", { name: "Open sign-in link" }).click();
-  await page.locator("#confirm-login").click();
-  await page.waitForURL((url) => url.hash === path.slice(1));
-  await page.locator(".site").waitFor();
-  checks.push("browser sign-in: " + name);
+  await signInFixture(page, origin, address, name, path);
+  checks.push("browser Sites sign-in fixture: " + name);
 }
 async function shot(page: Page, name: string) {
+  await page.waitForFunction(
+    () =>
+      document.body.dataset.route === location.hash.slice(2).split(/[?\/]/)[0],
+  );
   await page.locator(".site").waitFor();
   if (await page.locator("#world").count())
     await page.waitForFunction(
@@ -488,7 +445,6 @@ try {
   );
 } catch (error) {
   console.error(error);
-  console.error(logs);
   for (const context of browser.contexts())
     for (const page of context.pages())
       await page
@@ -503,19 +459,6 @@ try {
   process.exitCode = 1;
 } finally {
   await browser.close();
-  if (child) {
-    const proc = child;
-    await new Promise<void>((done) => {
-      const timer = setTimeout(() => {
-        proc.kill("SIGKILL");
-        done();
-      }, 5000);
-      proc.once("exit", () => {
-        clearTimeout(timer);
-        done();
-      });
-      proc.kill("SIGTERM");
-    });
-  }
+  await runtime.stop();
   await rm(scratch, { recursive: true, force: true });
 }

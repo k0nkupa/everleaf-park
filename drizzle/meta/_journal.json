@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1793440257891,
+      "tag": "0000_round_silver_samurai",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793442259563,
+      "tag": "0001_flimsy_orphan",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793442481760,
+      "tag": "0002_media_integrity",
+      "breakpoints": true
+    }
+  ]
+}

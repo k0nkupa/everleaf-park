@@ -2,16 +2,28 @@
 
 Everleaf: a cozy, endless 3D memorial park for pets. Walk an infinite Lantern Bloom park, light candles, leave toys and create a memorial that keeps its own plot.
 
-**Stack:** Node 24 + TypeScript server, three.js, esbuild, SQLite, Playwright verify scripts.
+**Stack:** Sites, Cloudflare Workers, D1, private R2, Sign in with ChatGPT, three.js and Vinext. Node.js 24+ is required for local tools.
 
 ## Quick start
 
 ```sh
-npm ci
+npm ci --ignore-scripts
+cp .env.example .dev.vars
+# Set IMAGE_PROCESSOR_URL and IMAGE_PROCESSOR_TOKEN in .dev.vars.
 npm run preview
 ```
 
-Open http://127.0.0.1:4881/#/ (the legacy village is at `#/village`).
+Open the printed local URL, normally http://127.0.0.1:4881/#/. The original village is at `#/village`. The Sites development sign-in widget supplies local mock identity. Hosted visitors use Sign in with ChatGPT. There is no guest keeper or magic-link login.
+
+Local records and objects use ignored `.wrangler/state/`. Apply the initial migration before using a fresh local database:
+
+```sh
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_round_silver_samurai.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_flimsy_orphan.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_media_integrity.sql
+```
+
+Run `npm run build` first to create that config. Apply each pending file once; do not replay it on an initialized local database. Generated assets and runtime data stay out of Git. Existing `.data/` records and personal uploads are not imported.
 
 ## Checks
 
@@ -20,6 +32,7 @@ npm run typecheck
 npm run build
 npm run verify:integration
 npm run verify:browser
+npm run verify:mail
 npm run verify:park
 npm run verify:3d   # needs a real GPU
 ```
@@ -38,7 +51,7 @@ A working website built from Tony’s supplied draft. Public discovery, accounts
 ./start-preview.sh
 ```
 
-Open [Everleaf preview](http://127.0.0.1:4881). This preview uses the supplied Blender village, all six house/garden environments and real 3D sculptures. Email is disabled. Creating a memorial establishes a local keeper session automatically; no email address or sign-in link is needed. Saved preview content stays in the ignored `.preview-data/` folder, separate from the original website data and configured Resend credentials.
+Open the printed local URL. The preview uses the supplied Blender village, all six house/garden environments and real 3D sculptures. Configure the authenticated image helper to save photographs. Email delivery remains disabled unless Resend credentials and a verified sender are deliberately configured.
 
 - Walk with WASD or arrow keys, or tap/click the ground.
 - Drag to look around. Scroll or use +/− to zoom.
@@ -48,40 +61,30 @@ Open [Everleaf preview](http://127.0.0.1:4881). This preview uses the supplied B
 
 The village's existing buildings are decorative source artwork. Named markers represent saved records. Private drafts and invitation-only memorials appear only to authorized visitors. A fresh preview database has no fictional user accounts or published memorials.
 
-Preview access is guarded to loopback-only development with email disabled. It refuses to start in public/production mode. Its separate cookie and database preserve the original site's sessions and data.
-
-## Run locally
-
-Requires Node.js 24 or newer.
+## Run the built Worker locally
 
 ```sh
-npm ci --ignore-scripts
 npm run build
-npm start
+npm start -- --port 4880
 ```
 
-Open http://127.0.0.1:4880. The server binds to this computer by default. If the system Node is older, `./start-local.sh` also recognizes the bundled Codex Node runtime.
+This uses the same local D1/R2 state and `.dev.vars`. The development server is the preferred local UI because it provides Sites mock sign-in. The built Worker expects identity headers from Sites dispatch.
 
 ## Configuration
 
-Copy `.env.example` to `.env` for a new checkout. The local `.env` is ignored by Git and must stay private.
+Keep local secrets in ignored `.dev.vars`; configure hosted values through Sites environment settings. Verification scripts read image-helper credentials from the process environment or ignored `.env`, and always disable real email.
 
-- `APP_ORIGIN`: the exact website address. Magic links and invitation links use it.
-- `DATA_DIR`: SQLite database and private uploaded files. Default `.data/`.
-- `RESEND_API_KEY`: sending key, kept on the server only.
-- `EMAIL_FROM`: verified sender. This workspace is configured for `Everleaf <memories@ours-mine.tienwavelabs.co.nz>`.
-- `MODERATOR_EMAILS`: comma-separated email addresses allowed to review reports.
+- `APP_ORIGIN`: exact hosted address for origin checks and invitation links. Leave empty locally to use the request origin.
+- `IMAGE_PROCESSOR_URL`, `IMAGE_PROCESSOR_TOKEN`: server-only authenticated image helper. JPG, PNG and WebP inputs are limited to 20,000,000 bytes and 40 million pixels.
+- `RESEND_API_KEY`, `EMAIL_FROM`: optional sending credentials and verified sender. Neither is enabled on the hosted Site by default.
+- `MODERATOR_EMAILS`: comma-separated ChatGPT account emails allowed to review reports.
 
-The key was copied from Tony’s `EVERLEAF_RESEND_API_KEY` assignment in `~/.zshrc`. No key is included in the repository. The supplied key cannot list Resend domains, so domain verification and actual delivery have not been independently accepted.
-
-With Resend configured, requesting sign-in or sending an invitation queues real email. This session’s automated checks deliberately disable delivery and use isolated databases; they never send to the test addresses.
-
-Without email credentials, **loopback-only development mode** displays single-use sign-in and invitation links so the complete local flow can be exercised. This bypass is unavailable in public mode. Public mode requires an HTTPS origin and configured email. Local links open only on the computer running the server.
+Keepers receive a shareable invitation link. When email is configured, delivery is queued and attempted after the request. No autonomous retry scheduler is installed; later delivery requests retry pending messages. Provider acceptance is distinct from delivery. Failed file removal stays queued and can be retried from My memorials.
 
 ## Implemented
 
 - Public village, pet-name search, species/theme filters and a readable list.
-- Single-use, expiring magic-link sign-in; HTTP-only sessions; logout.
+- Sign in with ChatGPT, stable Sites identity and native sign-out.
 - Persistent private drafts, validated pet details and optimistic concurrency protection.
 - Seven species; stylized/naturalistic catalogue sculptures; bronze/glaze/marble finishes for stylized options.
 - Independent choice of two settings and three themes; all 12 setting/theme/sculpture combinations persist.
@@ -114,21 +117,25 @@ npm run typecheck
 npm run build
 npm run verify:integration
 npm run verify:browser
+npm run verify:mail
+npm run verify:park
 npm run verify:3d
 ```
 
-No unit/Jest suites or hooks are used. The HTTP integration journey starts an isolated server and database, checks privacy/roles/files/actual persistence, restarts the server and verifies retained state, then removes its data. The browser journey opens temporary Chrome profiles and exercises real forms, file upload/crop, saving, public visiting, contribution review, invitations, all six theme/setting scenes, phone layouts, export and deletion.
+No unit/Jest suites or hooks are used. The HTTP integration journey starts the built Worker with isolated D1 and R2, checks privacy/roles/files/actual persistence, restarts the server and verifies retained state, then removes its data. Browser journeys supply fictional identity headers at a local edge fixture and open temporary Chrome profiles and exercises real forms, file upload/crop, saving, public visiting, contribution review, invitations, all six theme/setting scenes, phone layouts, export and deletion.
 
 The 3D check additionally covers actual WebGL output, GPU errors, collision, camera reset, all six environments, both dog meshes, all seven species, stable plots, anonymous/private access and phone controls. Canvas pixel checks ensure that submitted geometry actually appears on screen.
 
-The browser checks use installed Chrome. Set `CHROME_PATH` on other machines. It drives the actual HTML file input, not the native operating-system file dialog. Verification results are in `docs/verification-*.json`; selected screenshots are in `docs/screenshots/`.
+Local identity fixtures check app authorization; they do not prove hosted ChatGPT login. The browser checks use installed Chrome. Set `CHROME_PATH` on other machines. It drives the actual HTML file input, not the native operating-system file dialog. Verification results are in `docs/verification-*.json`; selected screenshots are in `docs/screenshots/`.
 
 ## Hosting limits
 
-The site has not been deployed. The playable preview is bound to this computer; phone verification uses a browser viewport, not physical phone hardware. This implementation uses one Node server with a persistent SQLite/media directory; it is not suitable for an ephemeral serverless filesystem or multiple independent replicas. Back up the database and media together. Public hosting also needs HTTPS, an externally reachable `APP_ORIGIN`, verified sender delivery and deployment-specific proxy/rate-limit configuration.
+The initial Site is owner-private and starts empty. Broader access and paid services need separate authority. Sign-in is handled by Sites dispatch. Media is stored in private R2 and served only through application authorization. The image helper has its own authenticated Worker; its platform quotas apply. Account billing-plan inspection was unavailable, and no paid upgrade was made.
+
+Phone verification uses a browser viewport, not physical phone hardware. Automated checks disable real email; actual sender delivery remains unverified. No 250-photo maximum-size export load check has been performed.
 
 The supplied village backgrounds contain decorative memorial structures. Only named markers/results loaded from the database represent published memorials. A fresh database starts empty; no fictional accounts or activity are presented as real.
 
 ## Source and review
 
-`docs/approved-draft.js` and its asset provenance retain the supplied design reference. `docs/IMPLEMENTATION.md` records the implementation scope and later clarifications. The import commit is the fixed baseline for the final Standards and Spec reviews. This is a local Git repository; no remote, push or deployment was created.
+`docs/approved-draft.js` and its asset provenance retain the supplied design reference. `docs/IMPLEMENTATION.md` records the implementation scope and later clarifications. The import commit is the fixed baseline for the final Standards and Spec reviews. The migration review baseline is the image-helper commit `e8bf76d`; the approved migration decisions are recorded in `docs/IMPLEMENTATION.md`. Sites stores a matching source commit and deployment archive.

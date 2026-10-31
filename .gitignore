@@ -14,3 +14,10 @@ dist/
 .wrangler/
 .dev.vars
 .dev.vars.*
+
+.next/
+.vinext/
+.sites-runtime/
+*.tsbuildinfo
+next-env.d.ts
+outputs/

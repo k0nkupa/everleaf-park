@@ -93,3 +93,13 @@ The source lighting/material character is adapted for real-time rendering; proce
 - No email was sent or queued by the preview checks. No unit/Jest suites or hooks were run.
 
 Remaining limits: local preview only, simplified navigation collision, adapted live lighting/procedural materials, and browser viewport checks rather than physical-phone acceptance. Other species share their extracted mesh across finish treatments; no user photo generates a model.
+
+## Sites migration review (31 October 2026)
+
+Baseline: `e8bf76d` (authenticated image helper). Fresh parallel Standards and Spec reviews covered the main migration and its new source files. Both focused follow-ups report no remaining blocker.
+
+Standards findings closed: preserve the user's HOME environment in the supplied setup scripts; remove the unused duplicate auth module. Spec findings closed: bind accepted member roles to stable Sites IDs and enforce the 250-photo cap atomically. The built-in Codex review identified request-driven mail retry and ZIP64 export gaps; those are fixed and covered by the isolated provider and HTTP/Python export journeys.
+
+Validation performed without unit/Jest suites or application test hooks: typecheck, production build, Worker/D1/R2 HTTP integration, local provider boundary, real Chrome browser forms and phone layouts, park planting/navigation, and 3D geometry/camera/collision checks. The image helper has separate live endpoint evidence. Browser identity fixtures do not prove hosted ChatGPT sign-in; hosted publication is tracked separately by Sites. Physical phone hardware, real email delivery and a maximum-size 250-photo export load remain unverified.
+
+The final built-in focused review reports no unresolved actionable finding after the verified attachment/delete race was fixed. Custom migration `0002_media_integrity.sql` prevents dangling/cross-memorial photo references and invalid published portraits. A real HTTP race verifies one winner and clean parent deletion. Ordinary memory edit/review writes also compare current status, so a concurrent keeper action cannot undo moderator hiding.

@@ -1,17 +1,9 @@
 {
-  "origin": "http://127.0.0.1:4893",
+  "status": "passed",
   "checks": [
-    "test hook only exposed with ?test in preview mode",
-    "eyes: rabbit 2, turtle 2, bird 2, dog 2, cat 2, horse 2, guinea 2",
-    "collision: Lantern Tree stops the walk at z=-1.40, diagonal slides to x=-6.10, stones block; dog metalness 0, roughness 0.82, luminance 0.46",
-    "start: 25 tiles around 0,0, 4 tile kinds parsed, 6 lamp lights",
-    "keyboard walk moved to tile 0,1",
-    "walked 10 tiles to 6,4: rings loaded, far tiles + origin memorials unloaded, demo-hazel on plot 6:4:5",
-    "plaza button returns to 0,0 and origin memorials reload",
-    "1280px: mouse click on demo-biscuit's stone opens its close-up",
-    "1280px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back",
-    "390px: touch tap on 26805832-eafd-41f4-a7d0-8c8b0dd611e1's stone opens its close-up",
-    "390px: park, pets list, view toggle, 3-step plant, close-up, candle, toy, back"
+    "keyboard walk streams a complete tile ring and unloads distant tiles",
+    "1280px: real geometry, view controls, validated three-step planting, portrait, candle, toy, Pets navigation and persisted close-up",
+    "390px: real geometry, view controls, validated three-step planting, portrait, candle, toy, Pets navigation and persisted close-up"
   ],
-  "at": "2026-10-31T08:33:35.512Z"
+  "at": "2026-10-31T10:27:11.565Z"
 }

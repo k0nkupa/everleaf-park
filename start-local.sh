@@ -14,5 +14,5 @@ if [[ ! -d node_modules ]]; then
   exit 1
 fi
 export PATH="$(dirname "$EVERLEAF_NODE"):$PATH"
-./node_modules/.bin/esbuild src/app.ts --bundle --format=esm --target=es2022 --outfile=public/app.js
-exec "$EVERLEAF_NODE" --env-file-if-exists=.env --experimental-strip-types src/server.ts
+npm run build:client
+exec "$EVERLEAF_NODE" scripts/run-framework.mjs dev --host 127.0.0.1 --port "${PORT:-4881}"

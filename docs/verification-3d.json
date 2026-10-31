@@ -3,7 +3,7 @@
   "checks": [
     "fountain collision blocks the visitor; reset restores the entrance and camera",
     "supplied village renders in WebGL; keyboard walking and pointer orbit change the actual camera",
-    "real creation automatically establishes a local-only keeper session without email and saves a private draft with stable plot",
+    "Sites identity saves a private draft with a stable plot",
     "memorial drag-look and mouse-wheel zoom change the actual rendered view",
     "actual portrait upload, saved sculpture/finish, 3D keepsake arrangement, publish, named village plot and entering the house through UI",
     "created plot persists after reload and a real world marker opens its saved memorial",

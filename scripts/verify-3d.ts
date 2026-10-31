@@ -1,10 +1,10 @@
 import { chromium, type Page } from "playwright-core";
-import { spawn } from "node:child_process";
+import { verificationRuntime } from "./sites-verification.ts";
+import { signInFixture } from "./sites-browser.ts";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createServer } from "node:net";
-import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 const scratch = await mkdtemp(resolve(tmpdir(), "everleaf-3d-"));
@@ -28,24 +28,7 @@ function check(message: string) {
   checks.push(message);
   console.log("PASS", message);
 }
-const child = spawn(
-  process.execPath,
-  ["--experimental-strip-types", "src/server.ts"],
-  {
-    env: {
-      ...process.env,
-      PREVIEW_MODE: "1",
-      NODE_ENV: "development",
-      HOST: "127.0.0.1",
-      PORT: String(port),
-      APP_ORIGIN: origin,
-      DATA_DIR: scratch,
-      RESEND_API_KEY: "",
-      EMAIL_FROM: "",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  },
-);
+const runtime = await verificationRuntime(scratch, port);
 const browser = await chromium.launch({
   executablePath:
     process.env.CHROME_PATH ||
@@ -58,6 +41,7 @@ async function page() {
   });
   const p = await context.newPage();
   p.setDefaultTimeout(30000);
+  p.setDefaultNavigationTimeout(30000);
   p.on("pageerror", (e) => errors.push(e.message));
   p.on("console", (msg) => {
     if (/WebGL|INVALID|Shader|buffer/i.test(msg.text()))
@@ -199,33 +183,14 @@ async function patch(p: Page, id: string, values: Record<string, unknown>) {
   return r.json();
 }
 try {
-  await new Promise<void>((done, reject) => {
-    const t = setTimeout(
-      () => reject(Error(logs || "Startup timed out")),
-      15000,
-    );
-    child.stdout!.on("data", (c) => {
-      logs += c;
-      if (logs.includes("Everleaf:")) {
-        clearTimeout(t);
-        done();
-      }
-    });
-    child.stderr!.on("data", (c) => (logs += c));
-    child.once("exit", (code) => {
-      if (code) {
-        clearTimeout(t);
-        reject(Error(logs));
-      }
-    });
-  });
+  await runtime.start();
   const owner = await page();
   await owner.goto(origin + "/#/village");
   await ready(owner);
   const session = await (
     await owner.request.get(origin + "/api/session")
   ).json();
-  assert.equal(session.preview, true);
+  assert.equal(session.preview, false);
   assert.equal(session.emailConfigured, false);
   assert.equal(session.user, null);
   await shot(owner, "01-village");
@@ -280,6 +245,7 @@ try {
   check(
     "supplied village renders in WebGL; keyboard walking and pointer orbit change the actual camera",
   );
+  await signInFixture(owner, origin, "owner@example.test", "Jamie");
   await owner
     .locator("header")
     .getByRole("link", { name: "Create a memorial", exact: true })
@@ -298,17 +264,10 @@ try {
   let record = await (
     await owner.request.get(origin + "/api/memorials/" + id)
   ).json();
-  // Demo memorials take the low plots, so a new draft gets the next free legacy index.
+  // Draft allocation is stable even before publication.
   assert.ok(Number.isInteger(record.plot_index) && record.plot_index >= 0);
   assert.equal(record.status, "draft");
-  assert(
-    (await owner.context().cookies()).some(
-      (c) => c.name === "everleaf_preview" && c.httpOnly,
-    ),
-  );
-  check(
-    "real creation automatically establishes a local-only keeper session without email and saves a private draft with stable plot",
-  );
+  check("Sites identity saves a private draft with a stable plot");
   await owner
     .getByLabel("Add or replace portrait")
     .setInputFiles(resolve("public/assets/img/A0.jpg"));
@@ -336,7 +295,8 @@ try {
   await owner
     .getByRole("button", { name: "Publish memorial", exact: true })
     .click();
-  await owner.waitForURL(/#\/village\?focus=/);
+  await owner.waitForURL(new RegExp("/m/"+id+"$"));
+  await owner.goto(origin+"/#/village?focus="+id);
   await ready(owner);
   assert.equal(
     await owner.locator("[data-selection-name]").textContent(),
@@ -386,7 +346,7 @@ try {
   record = await (
     await owner.request.get(origin + "/api/memorials/" + id)
   ).json();
-  // Demo memorials take the low plots, so a new draft gets the next free legacy index.
+  // Draft allocation is stable even before publication.
   assert.ok(Number.isInteger(record.plot_index) && record.plot_index >= 0);
   assert.equal(record.arrangement[0].x, 51);
   assert(record.portrait);
@@ -400,7 +360,10 @@ try {
   const records = JSON.parse(
     (await owner.locator("#world").getAttribute("data-records"))!,
   );
-  assert.equal(records.find((m: { id: string }) => m.id === id).plot_index, record.plot_index);
+  assert.equal(
+    records.find((m: { id: string }) => m.id === id).plot_index,
+    record.plot_index,
+  );
   await owner
     .getByRole("button", { name: "Return to entrance", exact: true })
     .click();
@@ -551,14 +514,11 @@ try {
   check(
     "existing archive protections and visibility review remain in force in the 3D preview",
   );
-  const db = new DatabaseSync(resolve(scratch, "everleaf.sqlite"), {
-    readOnly: true,
-  });
+  const db = await runtime.mf.getD1Database("DB");
   assert.equal(
-    (db.prepare("SELECT COUNT(*) n FROM mail").get() as { n: number }).n,
+    (await db.prepare("SELECT COUNT(*) n FROM mail").first<{ n: number }>())!.n,
     0,
   );
-  db.close();
   assert.equal(emailRequests, 0);
   assert.deepEqual(errors, []);
   const result = {
@@ -597,16 +557,6 @@ try {
   process.exitCode = 1;
 } finally {
   await browser.close();
-  await new Promise<void>((done) => {
-    const t = setTimeout(() => {
-      child.kill("SIGKILL");
-      done();
-    }, 5000);
-    child.once("exit", () => {
-      clearTimeout(t);
-      done();
-    });
-    child.kill("SIGTERM");
-  });
+  await runtime.stop();
   await rm(scratch, { recursive: true, force: true });
 }

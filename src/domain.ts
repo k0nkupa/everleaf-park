@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { one, many, run } from "./db.ts";
+import { one, many } from "./db.ts";
 import {
   THEMES,
   canManage,
@@ -59,8 +59,8 @@ export function requireUser(user: User | null): User {
   if (!user) throw new HttpError(401, "Sign in to continue.");
   return user;
 }
-export function getMemorial(id: string, user: User | null): Memorial {
-  const m = one<Memorial>("SELECT * FROM memorials WHERE id=?", id);
+export async function getMemorial(id: string, user: User | null) {
+  const m = await one<Memorial>("SELECT * FROM memorials WHERE id=?", id);
   if (!m) throw new HttpError(404, "This memorial is not available.");
   m.review = Boolean(m.review);
   m.moderated = Boolean(m.moderated);
@@ -69,10 +69,14 @@ export function getMemorial(id: string, user: User | null): Memorial {
     user?.id === m.owner_id
       ? "owner"
       : user
-        ? one<{ role: "viewer" | "contributor" | "keeper" }>(
-            "SELECT role FROM members WHERE memorial_id=? AND email=? AND status='accepted'",
-            id,
-            user.email,
+        ? (
+            await one<{
+              role: "viewer" | "contributor" | "keeper";
+            }>(
+              "SELECT role FROM members WHERE memorial_id=? AND user_id=? AND status='accepted'",
+              id,
+              user.id,
+            )
           )?.role || null
         : null;
   if (!m.role && (m.status !== "published" || m.visibility === "private"))
@@ -85,9 +89,9 @@ export function getMemorial(id: string, user: User | null): Memorial {
     throw new HttpError(404, "This memorial is resting.");
   return m;
 }
-export function owner(id: string, user: User | null) {
+export async function owner(id: string, user: User | null) {
   const u = requireUser(user),
-    m = getMemorial(id, u);
+    m = await getMemorial(id, u);
   if (!canManage(m))
     throw new HttpError(403, "Only the owner or a co-keeper can do that.");
   return m;
@@ -196,7 +200,9 @@ function bounded(value: unknown) {
   );
   return Math.round(value * 10) / 10;
 }
-export function publicSummary(m: Memorial) {
+export function publicSummary(
+  m: Memorial & { portrait_hidden: number | null },
+) {
   return {
     id: m.id,
     plot_index: m.plot_index,
@@ -210,16 +216,10 @@ export function publicSummary(m: Memorial) {
     style: m.style,
     finish: m.finish,
     portrait:
-      m.portrait_id &&
-      !one<{ hidden: number }>(
-        "SELECT hidden FROM media WHERE id=?",
-        m.portrait_id,
-      )?.hidden
-        ? `/media/${m.portrait_id}`
-        : null,
+      m.portrait_id && !m.portrait_hidden ? `/media/${m.portrait_id}` : null,
   };
 }
-export function memoriesFor(m: Memorial, user: User | null) {
+export async function memoriesFor(m: Memorial, user: User | null) {
   const manager = canManage(m),
     family = Boolean(m.role);
   const visible = manager
@@ -227,18 +227,23 @@ export function memoriesFor(m: Memorial, user: User | null) {
     : family
       ? "(status IN ('approved','family') OR user_id=?)"
       : "(status='approved' OR user_id=?)";
-  return many<Memory>(
+  const rows = await many<Memory>(
     `SELECT * FROM memories WHERE memorial_id=? AND ${visible} ORDER BY created_at DESC`,
     ...(manager ? [m.id] : [m.id, user?.id || ""]),
-  ).map((v) => {
+  );
+  const hidden = new Set(
+    (
+      await many<{ id: string }>(
+        "SELECT id FROM media WHERE memorial_id=? AND hidden=1",
+        m.id,
+      )
+    ).map((v) => v.id),
+  );
+  return rows.map((v) => {
     const allIds = JSON.parse(v.media_ids as unknown as string) as string[];
     const visibleIds = manager
       ? allIds
-      : allIds.filter(
-          (fid) =>
-            !one<{ hidden: number }>("SELECT hidden FROM media WHERE id=?", fid)
-              ?.hidden,
-        );
+      : allIds.filter((fid) => !hidden.has(fid));
     return {
       ...v,
       show_name: Boolean(v.show_name),
@@ -251,9 +256,9 @@ export function memoriesFor(m: Memorial, user: User | null) {
     };
   });
 }
-export function allowedMedia(file: Media, user: User | null) {
+export async function allowedMedia(file: Media, user: User | null) {
   if (user?.moderator && file.purpose !== "reference") {
-    const reported = many<{
+    const reported = await many<{
       media_ids: string | null;
       portrait_id: string | null;
       memory_id: string | null;
@@ -270,7 +275,7 @@ export function allowedMedia(file: Media, user: User | null) {
     )
       return;
   }
-  const m = getMemorial(file.memorial_id, user);
+  const m = await getMemorial(file.memorial_id, user);
   if (canManage(m)) return;
   if (file.hidden)
     throw new HttpError(
@@ -281,25 +286,28 @@ export function allowedMedia(file: Media, user: User | null) {
   if (file.purpose === "portrait" && m.portrait_id === file.id) return;
   if (
     file.purpose === "album" &&
-    memoriesFor(m, user).some((v) => v.media_ids.includes(file.id))
+    (await memoriesFor(m, user)).some((v) => v.media_ids.includes(file.id))
   )
     return;
   throw new HttpError(404, "This photograph is private or not available.");
 }
-export function rateLimit(key: string, max: number, window = 15 * 60 * 1000) {
+export async function rateLimit(
+  key: string,
+  max: number,
+  window = 15 * 60 * 1000,
+) {
   const now = Date.now();
-  const r = one<{ count: number; until_at: number }>(
-    "SELECT * FROM rate_limits WHERE key=?",
+  const result = await one<{ count: number }>(
+    "INSERT INTO rate_limits(key,count,until_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN until_at<=? THEN 1 ELSE count+1 END,until_at=CASE WHEN until_at<=? THEN ? ELSE until_at END WHERE until_at<=? OR count<? RETURNING count",
     key,
+    now + window,
+    now,
+    now,
+    now + window,
+    now,
+    max,
   );
-  if (r && r.until_at > now && r.count >= max)
+  if (!result)
     throw new HttpError(429, "Please wait a little before trying again.");
-  if (!r || r.until_at <= now)
-    run(
-      "INSERT OR REPLACE INTO rate_limits(key,count,until_at) VALUES(?,1,?)",
-      key,
-      now + window,
-    );
-  else run("UPDATE rate_limits SET count=count+1 WHERE key=?", key);
 }
 export const id = () => randomUUID();

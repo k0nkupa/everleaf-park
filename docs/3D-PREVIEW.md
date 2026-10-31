@@ -11,3 +11,7 @@ Acceptance: actual Chrome WebGL rendering and camera movement, collision boundar
 Review baseline: `9f4a1c0`, the completed local website before the 3D work. Existing package changes adding Three.js are part of this preview.
 
 Implementation: the village uses an orbitable overhead camera; memorials use a walking camera with drag-to-look. GLB models use meshopt compression with full geometry retained. The browser gate checks rendered canvas pixels and actual WebGL error state, in addition to saved-data/API readbacks. Source hashes are retained in scene manifests.
+
+## Sites migration clarification (31 October 2026)
+
+The approved Sites migration supersedes the original local-only hosting restriction. The same scene geometry and controls now use the Sites Worker, D1 and private R2. Guest keeper sessions were removed; local development uses the supported Sites mock identity and hosted users sign in with ChatGPT. Original `.data` files and Resend credentials are preserved without being imported or sent. Deployment starts owner-private. Verification fixtures remain isolated and do not add an application login bypass.

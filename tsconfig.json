@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "lib": [
       "ES2023",
       "DOM",
@@ -15,10 +15,29 @@
     "types": [
       "node"
     ],
-    "erasableSyntaxOnly": true
+    "erasableSyntaxOnly": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx"
   },
   "include": [
-    "src/**/*.ts",
-    "scripts/**/*.ts"
+    "src/app.ts",
+    "src/world.ts",
+    "src/park-ui.ts",
+    "src/park-world.ts",
+    "src/types.ts",
+    "src/park-grid.ts",
+    "src/park-assets.ts",
+    "src/pet-face.ts",
+    "scripts/verify-*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "scratch",
+    "services",
+    "dist",
+    ".wrangler",
+    ".sites-runtime"
   ]
 }

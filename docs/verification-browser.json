@@ -1,15 +1,15 @@
 {
   "status": "passed",
   "checks": [
-    "browser sign-in: Jamie",
+    "browser Sites sign-in fixture: Jamie",
     "real file input, browser crop, upload and saved portrait",
     "creation, independent choices, keyboard placement, publish and reload readback",
     "contribution file upload retains draft and saves memory through actual UI",
     "candle lit and retained across browser reload",
     "anonymous public discovery and memory names private until consent",
-    "browser sign-in: Alex",
+    "browser Sites sign-in fixture: Alex",
     "second account contribution waits for approval; text escaped and consent honored",
-    "browser sign-in: Viewer",
+    "browser Sites sign-in fixture: Viewer",
     "invitation created in UI and accepted by its bound email account",
     "UI role changes grant co-keeper management without permanent deletion and revoke it correctly",
     "six approved theme/setting combinations checked through browser saves",

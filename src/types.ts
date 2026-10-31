@@ -42,6 +42,9 @@ export type Placement = {
   y: number;
 };
 export type Memorial = {
+  park_i: number;
+  park_j: number;
+  park_k: number;
   plot_index: number;
   id: string;
   owner_id: string;

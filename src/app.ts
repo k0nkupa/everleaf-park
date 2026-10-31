@@ -16,8 +16,7 @@ import { mountWorld, type WorldHandle } from "./world.ts";
 import { mountParkUI, type ParkUI } from "./park-ui.ts";
 let park: ParkUI | null = null;
 let parkLegacy = false;
-let world: WorldHandle | null = null,
-  preview = false;
+let world: WorldHandle | null = null;
 const root = document.getElementById("app")!;
 const esc = (v: unknown) =>
   String(v ?? "").replace(
@@ -74,7 +73,7 @@ async function api<T = Record<string, unknown>>(
   return b as T;
 }
 const header = (m?: Memorial) =>
-  `<header class="site-header"><a class="brand" href="#/">Everleaf</a>${m ? `<span class="small desktop-only">${esc(m.name)} · ${m.setting === "house" ? "Memory House" : "Stillwater"}</span>` : ""}<nav class="site-nav">${link("Park", "/", "")}${user ? link("My memorials", "/home", "") : link("Sign in", "/login", "")}${link("Create a memorial", "/create", "btn p")}${user?.moderator ? link("Moderation", "/moderation", "") : ""}${user ? button("Sign out", "logout", "lnk") : ""}</nav></header>`;
+  `<header class="site-header"><a class="brand" href="#/">Everleaf</a>${m ? `<span class="small desktop-only">${esc(m.name)} · ${m.setting === "house" ? "Memory House" : "Stillwater"}</span>` : ""}<nav class="site-nav">${link("Park", "/", "")}${user ? link("My memorials", "/home", "") : link("Sign in", "/login", "")}${link("Create a memorial", "/create", "btn p")}${user?.moderator ? link("Moderation", "/moderation", "") : ""}${user ? '<a class="lnk" data-action="logout" target="_top" href="/signout-with-chatgpt?return_to=%2F">Sign out</a>' : ""}</nav></header>`;
 const shell = (content: string, m?: Memorial) =>
   `<div class="site">${header(m)}${content}</div>`;
 const field = (
@@ -218,16 +217,17 @@ async function homePage() {
   );
 }
 function loginPage(query: URLSearchParams) {
-  if (preview)
-    return shell(
-      `<main class="content narrow"><section class="panel"><h1>Keep a place of their own.</h1><form id="preview-form">${field("Your name", "name", "Keeper", 'required maxlength="80"')}<input type="hidden" name="next" value="${esc(query.get("next") || "/#/home")}">${errorBox()}${finishActions("Continue")}</form></section></main>`,
-    );
+  const requested = query.get("next") || "/#/home";
+  const next =
+    requested.startsWith("/#/") && !/[\r\n]/.test(requested)
+      ? requested
+      : "/#/home";
   return shell(
-    `<main class="content narrow"><section class="panel"><h1>Sign in to keep going</h1><p>We’ll send a one-time link. No password needed.</p>${query.get("error") ? '<p class="error">That link expired or was already used. Request a fresh one.</p>' : ""}<form id="login-form">${field("Your name", "name", "", 'required maxlength="80" autocomplete="name"')}${field("Email", "email", "", 'required autocomplete="email"', "email")}<input type="hidden" name="next" value="${esc(query.get("next") || "/#/home")}">${errorBox()}${finishActions("Send sign-in link")}</form><div id="login-result"></div></section></main>`,
+    `<main class="content narrow"><section class="panel"><h1>Sign in to keep going</h1><p>Use your ChatGPT account to create and manage memorials.</p><a class="btn p" target="_top" href="/signin-with-chatgpt?return_to=${encodeURIComponent(next)}">Sign in with ChatGPT</a></section></main>`,
   );
 }
 function createPage() {
-  if (!preview && authRequired()) return "";
+  if (authRequired()) return "";
   return shell(
     `<main class="content narrow"><section class="panel"><h1>Tell us about your pet</h1><p class="muted">Nothing is public until you publish.</p><form id="create-form">${detailsForm()}${errorBox()}${finishActions("Save draft and add photos")}</form></section></main>`,
   );
@@ -250,7 +250,7 @@ async function editPage(mid: string, step: string) {
   if (step === "details")
     inside = `<form id="details-form">${detailsForm(m)}${errorBox()}${finishActions()}</form>`;
   if (step === "photos")
-    inside = `<div class="columns"><section><h2>Public portrait</h2><p class="muted">Choose a portrait visitors will recognize.</p>${portrait(m)}<div class="field"><label for="portrait-file">Add or replace portrait</label><input id="portrait-file" type="file" accept="image/jpeg,image/png,image/webp" data-upload="portrait"></div><div id="crop-tools"></div><h2>Private photographs</h2><p class="small muted">These stay private until you attach an album photo to an approved memory.</p><div class="field"><label for="album-file">Add album photo</label><input id="album-file" type="file" accept="image/jpeg,image/png,image/webp" data-upload="album"></div><div class="media-grid">${(m.media || []).map((f) => mediaTile(f)).join("")}</div>${errorBox()}</section><aside class="panel"><h3>A clear face, kept close.</h3><p>JPG, PNG or WebP · up to 25 MB and 40 megapixels. You can frame the portrait before saving it.</p><div class="form-actions">${link("Continue to sculpture", `/edit/${mid}/sculpture`, "btn p")}</div></aside></div>`;
+    inside = `<div class="columns"><section><h2>Public portrait</h2><p class="muted">Choose a portrait visitors will recognize.</p>${portrait(m)}<div class="field"><label for="portrait-file">Add or replace portrait</label><input id="portrait-file" type="file" accept="image/jpeg,image/png,image/webp" data-upload="portrait"></div><div id="crop-tools"></div><h2>Private photographs</h2><p class="small muted">These stay private until you attach an album photo to an approved memory.</p><div class="field"><label for="album-file">Add album photo</label><input id="album-file" type="file" accept="image/jpeg,image/png,image/webp" data-upload="album"></div><div class="media-grid">${(m.media || []).map((f) => mediaTile(f)).join("")}</div>${errorBox()}</section><aside class="panel"><h3>A clear face, kept close.</h3><p>JPG, PNG or WebP · up to 20 MB and 40 megapixels. You can frame the portrait before saving it.</p><div class="form-actions">${link("Continue to sculpture", `/edit/${mid}/sculpture`, "btn p")}</div></aside></div>`;
   if (step === "sculpture")
     inside = `<form id="sculpture-form"><p>Choose a still memorial sculpture from the collection.</p><div class="two" style="margin-top:18px">${[
       [
@@ -466,7 +466,7 @@ async function invitePage(value: string) {
     "/invitations/" + value,
   );
   return shell(
-    `<main class="content narrow"><section class="panel"><h1>You’re invited to remember ${esc(data.name)}.</h1><p>Access: ${esc(data.role)}. Accept with the email address that received this invitation.</p>${button("Accept invitation", "accept-invite", "btn p", `data-token="${esc(value)}"`)}${errorBox()}</section></main>`,
+    `<main class="content narrow"><section class="panel"><h1>You’re invited to remember ${esc(data.name)}.</h1><p>Access: ${esc(data.role)}. Sign in with ChatGPT using the email address that received this invitation.</p>${button("Accept invitation", "accept-invite", "btn p", `data-token="${esc(value)}"`)}${errorBox()}</section></main>`,
   );
 }
 async function circlePage(mid: string) {
@@ -547,17 +547,22 @@ async function render() {
     world = null;
     current = null;
     const legacy = head[0] === "park-classic";
-    if (park && parkLegacy !== legacy) { park.destroy(); park = null; }
+    if (park && parkLegacy !== legacy) {
+      park.destroy();
+      park = null;
+    }
     parkLegacy = legacy;
     if (!park)
-      park = mountParkUI(root, {
-        api,
-        getUser: () => user,
-        setUser: (u) => (user = u),
-        isPreview: () => preview,
-        go,
-        toast,
-      }, { legacy });
+      park = mountParkUI(
+        root,
+        {
+          api,
+          getUser: () => user,
+          go,
+          toast,
+        },
+        { legacy },
+      );
     document.body.dataset.route = "park";
     document.title = "Everleaf Park";
     park.show(legacy ? null : head[1] || null);
@@ -705,9 +710,9 @@ async function prepareCrop(file: File) {
   const start = location.hash;
   if (
     !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
-    file.size > 25 * 1024 * 1024
+    file.size > 20_000_000
   )
-    throw Error("Choose a JPG, PNG or WebP under 25 MB.");
+    throw Error("Choose a JPG, PNG or WebP under 20 MB.");
   const image = await createImageBitmap(file);
   if (location.hash !== start) {
     image.close();
@@ -820,35 +825,7 @@ document.addEventListener("submit", async (event) => {
       );
       return;
     }
-    if (form.id === "preview-form") {
-      const session = await api<{ user: User }>(
-        "/preview/session",
-        "POST",
-        data,
-      );
-      user = session.user;
-      const next = data.next?.startsWith("/#/") ? data.next.slice(2) : "/home";
-      done(next);
-      await render();
-      return;
-    }
-    if (form.id === "login-form") {
-      const result = await api<{ message: string; loginUrl?: string }>(
-        "/auth/request",
-        "POST",
-        data,
-      );
-      document.getElementById("login-result")!.innerHTML =
-        `<p class="success">${esc(result.message)}</p>${result.loginUrl ? `<p class="small muted">Local development sign-in:</p><a class="btn p" href="${esc(result.loginUrl)}">Open sign-in link</a>` : ""}`;
-      return;
-    }
     if (form.id === "create-form") {
-      if (preview && !user) {
-        const session = await api<{ user: User }>("/preview/session", "POST", {
-          name: "Keeper",
-        });
-        user = session.user;
-      }
       const result = await api<Memorial>("/memorials", "POST", {
         ...defaults,
         ...data,
@@ -889,11 +866,7 @@ document.addEventListener("submit", async (event) => {
               ? "personalize"
               : "";
       done(
-        next
-          ? `/edit/${m!.id}/${next}`
-          : form.id === "publish-form" && preview
-            ? `/village?focus=${m!.id}`
-            : `/m/${m!.id}`,
+        next ? `/edit/${m!.id}/${next}` : `/m/${m!.id}`,
         form.id === "publish-form" ? "Memorial saved." : "Changes saved.",
       );
       return;
@@ -956,7 +929,7 @@ document.addEventListener("submit", async (event) => {
         await render();
         if (result.inviteUrl)
           document.getElementById("invite-result")!.innerHTML =
-            `<p class="success">Local invitation link:</p><div class="link-box"><a href="${esc(result.inviteUrl)}">${esc(result.inviteUrl)}</a></div>`;
+            `<p class="success">Invitation link:</p><div class="link-box"><a href="${esc(result.inviteUrl)}">${esc(result.inviteUrl)}</a></div>`;
       }
       return;
     }
@@ -1016,15 +989,11 @@ document.addEventListener("click", async (event) => {
   if (target instanceof HTMLButtonElement) target.disabled = true;
   try {
     if (action === "logout") {
-      await api("/logout", "POST");
       const prefix = "everleaf-draft:" + user?.id + ":",
         arrangementPrefix = "everleaf-arrangement:" + user?.id + ":";
       for (const k of Object.keys(sessionStorage))
         if (k.startsWith(prefix) || k.startsWith(arrangementPrefix))
           sessionStorage.removeItem(k);
-      user = null;
-      go("/");
-      await render();
       return;
     }
     if (action === "accept-invite") {
@@ -1040,7 +1009,7 @@ document.addEventListener("click", async (event) => {
       const result = await api<{ pending: number }>("/cleanup", "POST");
       toast(
         result.pending
-          ? "Photo cleanup is still pending. It will retry automatically."
+          ? "Photo cleanup is still pending. Try again later."
           : "Photo cleanup complete.",
       );
       await render();
@@ -1056,12 +1025,12 @@ document.addEventListener("click", async (event) => {
           role: target.dataset.role,
         },
       );
-      toast("Invitation resent.");
+      toast("New invitation created.");
       if (location.hash === start) {
         await render();
         if (result.inviteUrl)
           document.getElementById("invite-result")!.innerHTML =
-            `<p class="success">Local invitation link:</p><div class="link-box"><a href="${esc(result.inviteUrl)}">${esc(result.inviteUrl)}</a></div>`;
+            `<p class="success">Invitation link:</p><div class="link-box"><a href="${esc(result.inviteUrl)}">${esc(result.inviteUrl)}</a></div>`;
       }
       return;
     }
@@ -1280,11 +1249,8 @@ async function loadMemorial(mid: string) {
 }
 async function start() {
   try {
-    const session = await api<{ user: User | null; preview: boolean }>(
-      "/session",
-    );
+    const session = await api<{ user: User | null }>("/session");
     user = session.user;
-    preview = session.preview;
     await render();
   } catch (error) {
     root.innerHTML = `<main class="content"><p class="error">${esc(error instanceof Error ? error.message : "Everleaf could not open.")}</p></main>`;

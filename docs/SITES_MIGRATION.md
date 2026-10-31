@@ -1,59 +1,32 @@
-# Sites migration: compatibility checkpoint
+# Sites migration
 
-Status: authenticated image helper deployed and verified. The main application
-has not been migrated or deployed. Updated on 31 October 2026.
+Status: application migrated locally; typecheck, build, HTTP, browser, park and 3D checks pass. Independent Standards/Spec review and the final built-in focused review found no remaining blocker. Private Sites publication follows this source checkpoint. Updated on 31 October 2026.
 
-## Approved image helper: implemented
+## Approved direction and implementation
 
-Tony approved creating `everleaf-image-processor` in `The Ton Le Account`.
-The Worker is deployed at
-`https://everleaf-image-processor.the-ton-le-account.workers.dev` with an Images
-binding and a server-only secret. No subscription or paid upgrade was changed.
-Anonymous requests return 401; all processing requires bearer authentication.
+- Preserve the frontend, 3D assets, memorial workflows and access rules.
+- Sites hosts the Worker. D1 replaces SQLite files; private R2 replaces local media. The first hosted database is empty. Local `.data` and personal media are not imported.
+- Sign in with ChatGPT replaces magic links and guest sessions. Ownership and accepted member roles use the stable Sites user ID. Pending invitations use the recipient's ChatGPT email. Initial publication is owner-private.
+- Image uploads accept JPG/PNG/WebP up to 20,000,000 bytes and 40 million pixels. Originals remain private. Display JPEGs preserve orientation/crop behavior and remove metadata. Exports stream originals, display photographs and written content through keeper authorization, with ZIP64 records for large archives.
+- D1 batches/counters preserve plot allocation; guarded writes prevent duplicate candles, plot claims and invitation acceptance. Durable row leases coordinate mail and R2 cleanup. No timer or autonomous retry scheduler is installed. Keepers can retry failed cleanup from My memorials; pending email is retried on later delivery requests.
+- Real email is opt-in. No Resend credentials were added to Sites. Keepers can copy authorized invitation links without claiming email delivery.
+- No unit/Jest tests or application test hooks. Checks use typechecking, build, real Worker/D1/R2 HTTP journeys, browser journeys and the live image helper. Local identity fixtures do not prove hosted ChatGPT sign-in.
 
-Source and deployment configuration are in `services/image-processor/`. The
-HTTP interface is `POST /normalize?purpose=portrait|album|reference`, with
-optional portrait `zoom` (1–3), `x` and `y` (0–1). Accepted content types are
-`image/jpeg`, `image/png` and `image/webp`. The helper enforces an actual streamed
-input-byte count of 20,000,000 and a decoded-image limit of 40 million pixels.
-PNG/WebP EXIF may be at the end, so the helper buffers only this bounded input
-before making orientation explicit. Output JPEG metadata is removed while
-streaming the response; it is marked `private, no-store`.
+## Image helper: deployed and verified
 
-Use `IMAGE_PROCESSOR_URL` and `IMAGE_PROCESSOR_TOKEN` only on the server. The local
-values are in ignored `.env`; the deployed Worker stores the token as a secret.
-Never include it in frontend code, Git, logs or request URLs. Everleaf still uses
-its original local image pipeline until the Sites backend is migrated.
+Tony approved `everleaf-image-processor` in `The Ton Le Account` at `https://everleaf-image-processor.the-ton-le-account.workers.dev`. It has an Images binding and server-only bearer secret. Anonymous requests return 401. No subscription or paid upgrade was changed. Account billing-plan inspection was unavailable through the connected OAuth permissions; free-tier eligibility is not asserted.
 
-`npm run verify:images` exercised the real authenticated Worker with synthetic
-fixtures. JPEG, PNG and WebP each passed all eight EXIF orientations, metadata
-removal and an off-centre zoomed crop comparison against the existing Sharp
-pipeline. Authentication, MIME type, corrupt input, crop bounds, byte limits and
-pixel limits were checked. A 20,000,000-byte input and a 40-megapixel input passed;
-inputs beyond each limit were rejected. Album aspect ratio and no-enlargement
-behavior passed. See `docs/verification-image-processor.json`.
+Source is in `services/image-processor/`. `POST /normalize?purpose=portrait|album|reference` accepts optional portrait `zoom` (1–3), `x` and `y` (0–1). PNG/WebP EXIF can be at the end, so bounded input is buffered before orientation is made explicit. Output metadata is removed while streaming; responses are `private, no-store`. `IMAGE_PROCESSOR_URL` and `IMAGE_PROCESSOR_TOKEN` exist only in ignored local configuration and the Sites runtime environment.
 
-These checks prove managed normalization, not hosted R2 privacy or the migrated
-app. Those checks belong to the next end-to-end slices. The initial investigation
-below is retained as historical evidence of why this helper was needed.
+`npm run verify:images` exercised the actual helper with synthetic fixtures: all eight EXIF orientations in JPEG/PNG/WebP, metadata removal, crop/zoom comparison against Sharp, album aspect ratio and no enlargement, authentication, MIME/corrupt input and crop bounds. Exact 20,000,000-byte and 40-million-pixel inputs passed; larger inputs failed. See `docs/verification-image-processor.json`.
 
-## Approved direction
+## Migration evidence
 
-- Preserve the existing frontend, 3D assets, memorial workflows and access rules.
-- Use Sites hosting, D1 records, private R2 media and Sign in with ChatGPT.
-- Start with an empty hosted database. Do not import local personal media.
-- Preserve JPG/PNG/WebP, orientation correction, portrait crop,
-  metadata-stripped display JPEGs and private originals. The current code accepts
-  up to 25 MiB and 40 million pixels (`src/server.ts:557` and `src/server.ts:560`).
-  Tony subsequently allowed a lower upload limit and asked to investigate managed
-  Cloudflare Images. The helper now enforces the lower limit; the unmigrated main
-  application still uses its original limit.
-- Verify through HTTP and browser journeys. No unit tests, Jest or application
-  test hooks. Review before committing and publishing.
+The migrated HTTP integration checks pass against the built Worker with disposable D1 and R2, including privacy/roles, original bytes, moderation, invitations, export, restart persistence and cleanup. Parallel requests also check unique plot allocation/claims, one candle per person, single-use invitations and the 250-photo cap. Owner and contributor profile changes retain roles; another account with the former email receives no role. Python zipfile independently reads the ZIP64 export, validates CRCs and compares the original photo bytes. See `docs/verification-integration.json`. Photo attachment/deletion and keeper-review/moderator-hide races preserve media and privacy invariants. The isolated provider journey in `docs/verification-mail.json` proves that a later invitation retries a failed message with the same idempotency key; no real email leaves the fixture.
 
-The implementation plan places image/export compatibility before migrating all
-routes. That gate found an unresolved image-processing dependency; broad backend
-changes have therefore not started. The existing local application is intact.
+Browser, park and 3D journeys passed against the migrated Worker. The 3D journey loaded all six environments and all 17 required models, checked camera/collision movement, stable plots and phone controls. Hosted sign-in and deployment acceptance are recorded separately from local fixtures. Maximum 250-photo export load, physical phone hardware and actual email delivery remain outside this verification.
+
+The investigation below is historical evidence of why the approved image helper was needed.
 
 ## Initial compatibility checks (before helper approval)
 
@@ -167,6 +140,6 @@ viewing possible when public Site access is separately enabled.
 - [Flexible variant access restrictions](https://developers.cloudflare.com/images/optimization/hosted-images/enable-flexible-variants/)
 
 Sources describe platform/package behavior; the local runtime outputs above are
-the evidence collected for this project. No managed image-normalization or
-complete memorial ZIP-export success is claimed. The ZIP proof covers a synthetic
-R2 object, not a migrated application or a maximum-size 250-photo archive.
+the evidence collected for this project. The initial ZIP proof covered a synthetic R2 object. The later migrated HTTP journey verifies a complete memorial export, but not a maximum-size 250-photo archive.
+
+- [ZIP64 and streaming writer options](https://gildas-lormeau.github.io/zip.js/api/interfaces/ZipWriterConstructorOptions.html)

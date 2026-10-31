@@ -6,8 +6,6 @@ import { tileKind, type GlobalPlot } from "./park-grid.ts";
 type Deps = {
   api<T = Record<string, unknown>>(path: string, method?: string, data?: unknown): Promise<T>;
   getUser(): User | null;
-  setUser(u: User): void;
-  isPreview(): boolean;
   go(path: string): void;
   toast(msg: string): void;
 };
@@ -96,8 +94,6 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
       if (el) el.textContent = k + (tileKind(i, j) === "landmark" ? " · 🏮" : "");
     },
   });
-  // Test/dev hook for verify scripts and screenshots: only in preview mode with ?test in the URL.
-  if (deps.isPreview() && new URLSearchParams(location.search).has("test")) (stage as HTMLElement & { park?: ParkHandle }).park = park;
 
   // Clock: real local time, a gentle day-part label.
   const tickClock = () => {
@@ -233,9 +229,7 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
     d.busy = true; d.error = ""; renderCreate();
     try {
       if (!deps.getUser()) {
-        if (!deps.isPreview()) { closeCreate(); deps.go("/login?next=" + encodeURIComponent("/#/")); return; }
-        const s = await deps.api<{ user: User }>("/preview/session", "POST", { name: "Keeper" });
-        deps.setUser(s.user);
+        closeCreate(); deps.go("/login?next=" + encodeURIComponent("/#/")); return;
       }
       const base = { name: d.name, species: d.species, born: String(d.born), passed: String(d.passed), message: d.message, theme: "A", setting: "garden", style: "stylized", finish: "glaze", visibility: "public", review: false, arrangement: [] };
       const m = await deps.api<{ id: string }>("/memorials", "POST", base);

@@ -1,0 +1,8 @@
+{
+  "status": "passed",
+  "checks": [
+    "failed invitation mail stays pending; a later invitation retries it and sends the new message; retry keeps its provider idempotency key"
+  ],
+  "emailsSent": 0,
+  "provider": "isolated local HTTP fixture"
+}

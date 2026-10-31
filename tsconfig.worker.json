@@ -1,0 +1,39 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "node",
+      "@cloudflare/workers-types",
+      "vite/client"
+    ]
+  },
+  "include": [
+    "src/server.ts",
+    "src/db.ts",
+    "src/domain.ts",
+    "src/cleanup.ts",
+    "src/mail.ts",
+    "src/runtime.ts",
+    "src/export.ts",
+    "src/park.ts",
+    "worker/**/*.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "db/**/*.ts",
+    "cloudflare-env.d.ts",
+    "vite.config.ts",
+    "drizzle.config.ts",
+    "scripts/vite/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "scratch",
+    "services",
+    "dist",
+    ".wrangler",
+    ".sites-runtime"
+  ]
+}
