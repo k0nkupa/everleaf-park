@@ -1,6 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { freePlots, plotKey } from "./park-grid.ts";
 export const dataDir = resolve(process.env.DATA_DIR || ".data");
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 mkdirSync(resolve(dataDir, "media"), { recursive: true, mode: 0o700 });
@@ -49,6 +50,9 @@ for (const [table, definition] of [
   ["media", "hidden INTEGER NOT NULL DEFAULT 0"],
   ["audit", "target_id TEXT"],
   ["memorials", "plot_index INTEGER"],
+  ["memorials", "park_i INTEGER"],
+  ["memorials", "park_j INTEGER"],
+  ["memorials", "park_k INTEGER"],
 ] as const) {
   const column = definition.split(" ")[0];
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as {
@@ -69,4 +73,34 @@ transaction(() => {
   run(
     "CREATE UNIQUE INDEX IF NOT EXISTS memorial_plot ON memorials(plot_index)",
   );
+  // Infinite park: a global plot (tile i, tile j, plot k). Rows from the closed
+  // park keep plot_index and get a park plot by spiralling out from the origin
+  // in their old plot order, so existing memorials stay in the same sequence.
+  run(
+    "CREATE UNIQUE INDEX IF NOT EXISTS memorial_park_plot ON memorials(park_i,park_j,park_k)",
+  );
+  assignParkPlots();
 });
+
+/** Give every memorial without a park plot the next free one from the origin. */
+export function assignParkPlots(onlyPublic = false) {
+  const missing = many<{ id: string }>(
+    `SELECT id FROM memorials WHERE park_k IS NULL${onlyPublic ? " AND status='published' AND visibility='public'" : ""} ORDER BY plot_index,created_at,id`,
+  );
+  if (!missing.length) return;
+  const taken = new Set(
+    many<{ i: number; j: number; k: number }>(
+      "SELECT park_i i,park_j j,park_k k FROM memorials WHERE park_k IS NOT NULL",
+    ).map(plotKey),
+  );
+  const free = freePlots(taken, missing.length);
+  missing.forEach((m, n) =>
+    run(
+      "UPDATE memorials SET park_i=?,park_j=?,park_k=? WHERE id=?",
+      free[n].i,
+      free[n].j,
+      free[n].k,
+      m.id,
+    ),
+  );
+}

@@ -332,6 +332,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     user,
     hash(ip + (req.headers["user-agent"] || "")),
     () => body(req),
+    url.searchParams,
   );
   if (park) {
     if (method === "POST") rateLimit("park:" + ip, 300, 3600000);

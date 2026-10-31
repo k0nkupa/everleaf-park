@@ -3,10 +3,12 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
-import { db, dataDir, one, many, run, transaction } from "./db.ts";
+import { db, dataDir, one, many, run, transaction, assignParkPlots } from "./db.ts";
+import { freePlots, parsePlotKey, plotKey, tileKind, type GlobalPlot } from "./park-grid.ts";
 import { HttpError, requireValue, requireUser, getMemorial } from "./domain.ts";
 import type { User, Memorial } from "./types.ts";
 
+/** Plots in the legacy closed park (village_park.glb), still reachable at #/park-classic. */
 export const PLOT_COUNT = 36;
 export const STONES = ["classic", "arch", "heart", "leaf"] as const;
 export type Stone = (typeof STONES)[number];
@@ -14,10 +16,10 @@ export type Stone = (typeof STONES)[number];
 db.exec(`CREATE TABLE IF NOT EXISTS park(memorial_id TEXT PRIMARY KEY REFERENCES memorials(id) ON DELETE CASCADE,stone TEXT NOT NULL DEFAULT 'classic',visits INTEGER NOT NULL DEFAULT 0,lights INTEGER NOT NULL DEFAULT 0,toys INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS park_actions(memorial_id TEXT NOT NULL REFERENCES memorials(id) ON DELETE CASCADE,visitor TEXT NOT NULL,action TEXT NOT NULL,day TEXT NOT NULL,PRIMARY KEY(memorial_id,visitor,action,day));`);
 
-type Row = Memorial & { stone: string | null; visits: number | null; lights: number | null; toys: number | null; hidden: number | null };
+type Row = Memorial & { park_i: number | null; park_j: number | null; park_k: number | null; stone: string | null; visits: number | null; lights: number | null; toys: number | null; hidden: number | null };
 const publicRows = () =>
   many<Row>(
-    "SELECT m.*,p.stone,p.visits,p.lights,p.toys,md.hidden FROM memorials m LEFT JOIN park p ON p.memorial_id=m.id LEFT JOIN media md ON md.id=m.portrait_id WHERE m.status='published' AND m.visibility='public' AND m.moderated=0 ORDER BY m.plot_index",
+    "SELECT m.*,p.stone,p.visits,p.lights,p.toys,md.hidden FROM memorials m LEFT JOIN park p ON p.memorial_id=m.id LEFT JOIN media md ON md.id=m.portrait_id WHERE m.status='published' AND m.visibility='public' AND m.moderated=0 ORDER BY m.park_j,m.park_i,m.park_k",
   );
 const summary = (m: Row) => ({
   id: m.id,
@@ -26,7 +28,9 @@ const summary = (m: Row) => ({
   born: m.born,
   passed: m.passed,
   message: m.message,
-  plot: m.plot_index,
+  plot: { i: m.park_i ?? 0, j: m.park_j ?? 0, k: m.park_k ?? 0 },
+  plot_key: plotKey({ i: m.park_i ?? 0, j: m.park_j ?? 0, k: m.park_k ?? 0 }),
+  legacy_plot: m.plot_index < PLOT_COUNT ? m.plot_index : null,
   stone: (STONES as readonly string[]).includes(m.stone || "") ? m.stone : "classic",
   portrait: m.portrait_id && !m.hidden ? "/media/" + m.portrait_id : null,
   visits: m.visits || 0,
@@ -36,7 +40,12 @@ const summary = (m: Row) => ({
 });
 export type ParkMemorial = ReturnType<typeof summary>;
 
-const taken = () => new Set(many<{ p: number }>("SELECT plot_index p FROM memorials").map((r) => r.p));
+const taken = () =>
+  new Set(many<GlobalPlot>("SELECT park_i i,park_j j,park_k k FROM memorials WHERE park_k IS NOT NULL").map(plotKey));
+const nearTile = (s: string | null) => {
+  const m = String(s || "").match(/^(-?\d{1,4}),(-?\d{1,4})$/);
+  return m ? { i: Number(m[1]), j: Number(m[2]) } : { i: 0, j: 0 };
+};
 
 export async function parkRoute(
   path: string,
@@ -44,17 +53,19 @@ export async function parkRoute(
   user: User | null,
   visitorKey: string,
   readBody: () => Promise<Record<string, unknown>>,
+  query?: URLSearchParams,
 ): Promise<{ status: number; body: unknown } | null> {
   if (!path.startsWith("/api/park")) return null;
   if (path === "/api/park" && method === "GET") {
-    const used = taken();
+    transaction(() => assignParkPlots(true));
+    const near = nearTile(query?.get("near") ?? null);
     return {
       status: 200,
       body: {
-        plots: PLOT_COUNT,
         stones: STONES,
-        free: [...Array(PLOT_COUNT).keys()].filter((i) => !used.has(i)),
-        items: publicRows().filter((m) => m.plot_index < PLOT_COUNT).map(summary),
+        near,
+        free: freePlots(taken(), 12, near.i, near.j).map((p) => ({ ...p, key: plotKey(p), tile: tileKind(p.i, p.j) })),
+        items: publicRows().map(summary),
       },
     };
   }
@@ -66,18 +77,25 @@ export async function parkRoute(
     const u = requireUser(user),
       m = getMemorial(mid, u);
     requireValue(m.role === "owner" || m.role === "keeper", "Only the keeper can place this memorial.");
+    // Body: { plot: "i:j:k" } for a chosen plot, or { near: "i,j" } (or nothing)
+    // for the next free plot spiralling out from that tile (the origin by default).
     const b = await readBody(),
-      plot = Number(b.plot),
       stone = String(b.stone || "classic");
     requireValue((STONES as readonly string[]).includes(stone), "Choose a gravestone style.");
-    requireValue(Number.isInteger(plot) && plot >= 0 && plot < PLOT_COUNT, "Choose a plot in the park.");
+    const chosen = b.plot === undefined || b.plot === null || b.plot === "" ? null : parsePlotKey(b.plot);
+    requireValue(chosen || b.plot === undefined || b.plot === null || b.plot === "", "Choose a plot in the park.");
+    let placed!: GlobalPlot;
     transaction(() => {
-      const owner = one<{ id: string }>("SELECT id FROM memorials WHERE plot_index=?", plot);
-      requireValue(!owner || owner.id === mid, "That plot was just taken. Choose another.");
-      run("UPDATE memorials SET plot_index=? WHERE id=?", plot, mid);
+      const near = nearTile(typeof b.near === "string" ? b.near : null);
+      const used = taken();
+      const self = one<GlobalPlot>("SELECT park_i i,park_j j,park_k k FROM memorials WHERE id=? AND park_k IS NOT NULL", mid);
+      if (self) used.delete(plotKey(self));
+      placed = chosen || freePlots(used, 1, near.i, near.j)[0];
+      requireValue(!used.has(plotKey(placed)), "That plot was just taken. Choose another.");
+      run("UPDATE memorials SET park_i=?,park_j=?,park_k=? WHERE id=?", placed.i, placed.j, placed.k, mid);
       run("INSERT INTO park(memorial_id,stone) VALUES(?,?) ON CONFLICT(memorial_id) DO UPDATE SET stone=excluded.stone", mid, stone);
     });
-    return { status: 200, body: { ok: true } };
+    return { status: 200, body: { ok: true, plot: placed, plot_key: plotKey(placed) } };
   }
   const m = publicRows().find((r) => r.id === mid);
   if (!m) throw new HttpError(404, "This memorial is not in the park.");
@@ -103,6 +121,12 @@ const DEMOS: [string, Memorial["species"], string, string, Stone, string, string
   ["Hazel", "dog", "2013", "2026", "heart", "#b8875a", "Best friend on the beach."],
 ];
 const DEMO_PLOTS = [1, 4, 8, 13, 19, 22, 28, 33];
+// Spread over the infinite park: the plaza tile, its neighbours, and one far tile (6, 4)
+// so a walk shows tiles streaming in with memorials on them. k < 12 fits every tile kind.
+const DEMO_PARK: GlobalPlot[] = [
+  { i: 0, j: 0, k: 0 }, { i: 0, j: 0, k: 7 }, { i: 1, j: 0, k: 2 }, { i: -1, j: 0, k: 9 },
+  { i: 0, j: 1, k: 4 }, { i: 1, j: -1, k: 6 }, { i: -2, j: 2, k: 3 }, { i: 6, j: 4, k: 5 },
+];
 export async function seedDemo() {
   if (one<{ n: number }>("SELECT COUNT(*) n FROM memorials")!.n > 0) return;
   const uid = "demo-keeper", now = Date.now();
@@ -113,8 +137,8 @@ export async function seedDemo() {
     const jpg = await sharp(Buffer.from(svg)).jpeg({ quality: 85 }).toBuffer();
     await writeFile(resolve(dataDir, "media", fid + ".jpg"), jpg, { mode: 0o600 });
     transaction(() => {
-      run("INSERT INTO memorials(id,owner_id,name,species,born,passed,message,visibility,status,review,plot_index,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'public','published',0,?,?,?)",
-        mid, uid, name, species, born, passed, message, DEMO_PLOTS[i], now - i * 86400000, now - i * 86400000);
+      run("INSERT INTO memorials(id,owner_id,name,species,born,passed,message,visibility,status,review,plot_index,park_i,park_j,park_k,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'public','published',0,?,?,?,?,?,?)",
+        mid, uid, name, species, born, passed, message, DEMO_PLOTS[i], DEMO_PARK[i].i, DEMO_PARK[i].j, DEMO_PARK[i].k, now - i * 86400000, now - i * 86400000);
       run("INSERT INTO media(id,memorial_id,user_id,purpose,filename,path,original_path,bytes,created_at) VALUES(?,?,?,'portrait',?,?,?,?,?)",
         fid, mid, uid, name + ".jpg", fid + ".jpg", fid + ".jpg", jpg.length, now);
       run("UPDATE memorials SET portrait_id=? WHERE id=?", fid, mid);
