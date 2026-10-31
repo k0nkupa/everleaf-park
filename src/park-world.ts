@@ -513,6 +513,8 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       return g ? { x: g.position.x, z: g.position.z, plot: g.userData.plotKey } : null;
     },
     shot(pos, target, fogOn = true) {
+      controls.maxPolarAngle = Math.PI * 0.495; // allow true eye-level framing
+      controls.maxDistance = 400; controls.minDistance = 0.5;
       goal.active = false; focusId = null;
       camera.position.set(...pos); controls.target.set(...target);
       scene.fog = fogOn ? fog : null;
