@@ -336,7 +336,7 @@ try {
   await owner
     .getByRole("button", { name: "Publish memorial", exact: true })
     .click();
-  await owner.waitForURL(/#\/\?focus=/);
+  await owner.waitForURL(/#\/village\?focus=/);
   await ready(owner);
   assert.equal(
     await owner.locator("[data-selection-name]").textContent(),
@@ -400,7 +400,7 @@ try {
   const records = JSON.parse(
     (await owner.locator("#world").getAttribute("data-records"))!,
   );
-  assert.equal(records.find((m: { id: string }) => m.id === id).plot_index, 0);
+  assert.equal(records.find((m: { id: string }) => m.id === id).plot_index, record.plot_index);
   await owner
     .getByRole("button", { name: "Return to entrance", exact: true })
     .click();

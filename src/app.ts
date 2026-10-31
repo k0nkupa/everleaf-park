@@ -892,7 +892,7 @@ document.addEventListener("submit", async (event) => {
         next
           ? `/edit/${m!.id}/${next}`
           : form.id === "publish-form" && preview
-            ? `/?focus=${m!.id}`
+            ? `/village?focus=${m!.id}`
             : `/m/${m!.id}`,
         form.id === "publish-form" ? "Memorial saved." : "Changes saved.",
       );
