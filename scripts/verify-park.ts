@@ -130,7 +130,7 @@ try {
     await p.close();
   }
   for (const [w, h] of [[1280, 800], [390, 844]]) {
-    const p = await browser.newPage({ viewport: { width: w, height: h } });
+    const p = await browser.newPage({ viewport: { width: w, height: h }, hasTouch: w < 500, isMobile: w < 500 });
     p.on("pageerror", (e) => errors.push(e.message));
     await p.goto(origin + "/?test=1#/");
     await p.waitForSelector('#park-stage[data-ready="1"]', { timeout: 120000 });
@@ -138,6 +138,27 @@ try {
     const before = Number(await p.getAttribute("#park-stage", "data-memorials"));
     assert.ok(before >= 1, "park shows seeded memorials");
     assert.equal(await p.locator(".site-header").count(), 0, "no website header in the park");
+    // Tap / click a gravestone at its on-screen position: the close-up opens.
+    await p.waitForFunction(() => document.getElementById("park-stage")!.dataset.streaming === "idle", null, { timeout: 120000 });
+    await p.waitForTimeout(1500); // camera settled
+    const target = await p.evaluate(([W, Hh]) => {
+      const k = (document.getElementById("park-stage") as any).park;
+      for (const id of k.stats().memorials) {
+        const s = k.screenOf(id);
+        if (!s || s.x < W * 0.12 || s.x > W * 0.88 || s.y < Hh * 0.18 || s.y > Hh * 0.72) continue;
+        const el = document.elementFromPoint(s.x, s.y);
+        if (el?.classList.contains("park-canvas")) return { id, ...s };
+      }
+      return null;
+    }, [w, h]);
+    assert.ok(target, "a stone is visible on screen to tap");
+    if (w < 500) await p.touchscreen.tap(target.x, target.y);
+    else await p.mouse.click(target.x, target.y);
+    await p.waitForFunction((id) => location.hash === "#/p/" + id, target.id, { timeout: 30000 });
+    await p.waitForFunction(() => document.getElementById("park-stage")!.dataset.view === "memorial");
+    checks.push(`${w}px: ${w < 500 ? "touch tap" : "mouse click"} on ${target.id}'s stone opens its close-up`);
+    await p.click("[data-act=back]");
+    await p.waitForFunction(() => location.hash === "#/");
     await p.click("[data-act=pets]");
     assert.ok((await p.locator("#pet-list button").count()) >= 1);
     await p.click("[data-act=close-pets]");

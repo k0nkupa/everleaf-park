@@ -270,6 +270,9 @@ export function mountParkUI(root: HTMLElement, deps: Deps, mode: { legacy?: bool
   // ----- events -----
   root.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
+    // The 3D stage itself carries data-view (overview/close/memorial) as state; a click on the
+    // canvas must not be read as the "view" toggle (that bounced every stone tap back to "#/").
+    if (t.closest("#park-stage")) return;
     const btn = t.closest<HTMLElement>("[data-act],[data-open],[data-view],[data-species],[data-stone],[data-plot]");
     if (!btn) { if (t.classList.contains("modal-wrap")) { (t as HTMLElement).hidden = true; } return; }
     const a = btn.dataset;

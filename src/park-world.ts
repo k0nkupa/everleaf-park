@@ -27,6 +27,8 @@ export type ParkHandle = {
   step(dx: number, dz: number): { x: number; z: number };
   colliders(x: number, z: number): { x: number; z: number; r: number }[];
   /** Pet material check: metalness, roughness and linear luminance of its base colour. */
+  /** Client (CSS px) position of a memorial's stone, or null if off screen. */
+  screenOf(id: string): { x: number; y: number } | null;
   /** World position of a memorial's pet (test/screenshot use). */
   petPosition(id: string): [number, number, number] | null;
   petLook(id: string): { metalness: number; roughness: number; luminance: number; eyes: number; species: string } | null;
@@ -91,7 +93,7 @@ export type ParkOpts = {
 // Streaming radius (in tiles, Chebyshev): load <= LOAD_R, drop > DROP_R. The gap is hysteresis
 // so walking back and forth over a seam doesn't thrash.
 const LOAD_R = 2, DROP_R = 3, LAMP_LIGHTS = 6;
-// Stones read better from above at a modest 1.25x; a soft ground ring + far marker do the rest.
+// Stones read better from above at a modest 1.25x; a soft ground glow ring keeps them findable.
 const STONE_SCALE = 1.25, PLAYER_R = 0.35, STONE_R = 0.85, CELL = 0.5;
 type Collider = { x: number; z: number; r: number };
 
@@ -104,26 +106,16 @@ function radialTexture(inner: string, outer: string) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-let glowTex: THREE.Texture | null = null, ringTex: THREE.Texture | null = null, markerTex: THREE.Texture | null = null;
+let glowTex: THREE.Texture | null = null, ringTex: THREE.Texture | null = null;
 const candleGlowMat = () => new THREE.SpriteMaterial({ map: (glowTex ??= radialTexture("rgba(255,196,110,1)", "rgba(255,160,60,0)")), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
 function ringTexture() {
   if (ringTex) return ringTex;
   const c = document.createElement("canvas"); c.width = c.height = 128;
   const g = c.getContext("2d")!, grad = g.createRadialGradient(64, 64, 30, 64, 64, 64);
-  grad.addColorStop(0, "rgba(255,226,150,0)"); grad.addColorStop(0.55, "rgba(255,226,150,0.85)"); grad.addColorStop(1, "rgba(255,226,150,0)");
+  grad.addColorStop(0, "rgba(255,226,150,0)"); grad.addColorStop(0.55, "rgba(255,222,140,1)"); grad.addColorStop(1, "rgba(255,226,150,0)");
   g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
   ringTex = new THREE.CanvasTexture(c); ringTex.colorSpace = THREE.SRGBColorSpace;
   return ringTex;
-}
-function markerTexture() {
-  if (markerTex) return markerTex;
-  const c = document.createElement("canvas"); c.width = c.height = 128;
-  const g = c.getContext("2d")!;
-  g.fillStyle = "rgba(255,240,205,0.95)"; g.strokeStyle = "rgba(122,78,40,0.9)"; g.lineWidth = 8;
-  g.beginPath(); g.moveTo(64, 10); g.bezierCurveTo(112, 40, 110, 92, 64, 120); g.bezierCurveTo(18, 92, 16, 40, 64, 10); g.fill(); g.stroke();
-  g.beginPath(); g.moveTo(64, 26); g.lineTo(64, 108); g.stroke();
-  markerTex = new THREE.CanvasTexture(c); markerTex.colorSpace = THREE.SRGBColorSpace;
-  return markerTex;
 }
 const tileKey = (i: number, j: number) => `${i},${j}`;
 
@@ -305,12 +297,11 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     g.userData.plotKey = m.plot_key;
     g.userData.species = m.species;
     stone.scale.multiplyScalar(STONE_SCALE);
-    // Readable from above: a soft warm ring on the plot, plus a leaf marker that fades in at distance.
-    const ring = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: ringTexture(), transparent: true, depthWrite: false, opacity: 0.75 }));
+    // Readable from above: a soft warm glow ring on the plot.
+    const ring = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: ringTexture(), transparent: true, depthWrite: false, opacity: 0.95 }));
+    ring.raycast = () => {}; // never steals a tap from the stone
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.name = "plot-ring"; ring.userData.owned = true;
-    const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(), depthWrite: false, transparent: true, opacity: 0 }));
-    marker.name = "far-marker"; marker.position.y = 2.6; marker.scale.setScalar(1.4); marker.userData.owned = true; marker.userData.ownGeometry = false;
-    g.add(ring, marker);
+    g.add(ring);
     return g;
   }
   // Only per-memorial planes own their geometry/material/texture; clones share the cached GLTF data.
@@ -319,7 +310,7 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     g.traverse((o) => {
       if (!o.userData.owned) return;
       const mesh = o as THREE.Mesh, mat = mesh.material as THREE.MeshStandardMaterial;
-      if (mat.map && mat.map !== glowTex && mat.map !== ringTex && mat.map !== markerTex && !mat.userData.pet) mat.map.dispose();
+      if (mat.map && mat.map !== glowTex && mat.map !== ringTex && !mat.userData.pet) mat.map.dispose();
       mat.dispose();
       if (o.userData.ownGeometry !== false) mesh.geometry.dispose();
     });
@@ -542,23 +533,51 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     goal.active = false;
   }
 
+  // Picking: mouse click and touch tap (pointer events). A tap is a press that moved less than
+  // a few px (more for touch), so orbit drags never select. Hits walk up to the memorial group,
+  // so any stone / pet / prop / candle mesh counts; a tap on the plot's ground picks it too.
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-  let down: { x: number; y: number } | null = null;
-  canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY }; goal.active = false; });
-  canvas.addEventListener("pointerup", (e) => {
-    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
+  const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), groundHit = new THREE.Vector3();
+  const memorialOf = (o: THREE.Object3D | null) => {
+    for (; o; o = o.parent) if (o.userData.memorialId && byId.get(o.userData.memorialId) === o) return o.userData.memorialId as string;
+    return undefined;
+  };
+  function pick(clientX: number, clientY: number) {
     const r = canvas.getBoundingClientRect();
-    pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    pointer.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(pointer, camera);
-    const hit = raycaster.intersectObjects(pickables, true)[0];
-    const id = hit?.object.userData.memorialId as string | undefined;
+    for (const h of raycaster.intersectObjects(pickables.filter((g) => g.visible), true)) {
+      const id = memorialOf(h.object);
+      if (id) return id;
+    }
+    if (!raycaster.ray.intersectPlane(ground, groundHit)) return undefined;
+    let best: string | undefined, bestD = 1.4;
+    for (const g of pickables) {
+      const d = Math.hypot(g.position.x - groundHit.x, g.position.z - groundHit.z);
+      if (d < bestD) { bestD = d; best = g.userData.memorialId; }
+    }
+    return best;
+  }
+  let down: { x: number; y: number; id: number; touch: boolean } | null = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.isPrimary) down = { x: e.clientX, y: e.clientY, id: e.pointerId, touch: e.pointerType !== "mouse" };
+    else down = null; // second finger = pinch, not a tap
+    goal.active = false;
+  });
+  canvas.addEventListener("pointercancel", () => { down = null; });
+  canvas.addEventListener("pointerup", (e) => {
+    const d = down; down = null;
+    if (!d || d.id !== e.pointerId || Math.hypot(e.clientX - d.x, e.clientY - d.y) > (d.touch ? 12 : 6)) return;
+    const id = pick(e.clientX, e.clientY);
     if (id) opts.onSelect(id);
   });
+  let hoverFrame = 0;
   canvas.addEventListener("pointermove", (e) => {
-    const r = canvas.getBoundingClientRect();
-    pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-    raycaster.setFromCamera(pointer, camera);
-    canvas.style.cursor = raycaster.intersectObjects(pickables, true).length ? "pointer" : "grab";
+    if (e.pointerType !== "mouse" || hoverFrame) return;
+    hoverFrame = requestAnimationFrame(() => {
+      hoverFrame = 0;
+      canvas.style.cursor = pick(e.clientX, e.clientY) ? "pointer" : "grab";
+    });
   });
 
   const resize = () => {
@@ -593,11 +612,9 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
     // Keep neighbouring stones from blocking the close-up.
     const focused = focusId ? byId.get(focusId) : undefined;
     for (const g of pickables) g.visible = !focused || g === focused || g.position.distanceTo(camera.position) > 2.4;
-    const camH = camera.position.y;
     memorialRoot.traverse((o) => {
       if (o.name === "flame") o.scale.y = 1.6 + Math.sin(t * 9 + o.id) * 0.25;
       else if (o.name === "candle-glow") o.scale.setScalar(0.36 + Math.sin(t * 7 + o.id) * 0.04);
-      else if (o.name === "far-marker") ((o as THREE.Sprite).material.opacity = THREE.MathUtils.clamp((camH - 18) / 14, 0, 1));
     });
     controls.update();
     renderer.render(scene, camera);
@@ -632,6 +649,13 @@ export function mountPark(host: HTMLElement, opts: ParkOpts): ParkHandle {
       return { x: controls.target.x, z: controls.target.z };
     },
     colliders: (x, z) => collidersNear(x, z),
+    screenOf(id) {
+      const g = byId.get(id);
+      if (!g) return null;
+      const v = g.position.clone().setY(0.7).project(camera), r = canvas.getBoundingClientRect();
+      if (v.z > 1 || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) return null;
+      return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+    },
     petPosition(id) {
       let pos: [number, number, number] | null = null;
       byId.get(id)?.traverse((o) => { if (!pos && o.name === "pet-faced") { const b = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()); pos = [b.x, b.y, b.z]; } });
